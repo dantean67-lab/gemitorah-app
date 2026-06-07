@@ -12,14 +12,12 @@ st.set_page_config(
 # 2. עיצוב פרימיום (צבעי ירוק תורני, זהב, צללים ורדיוסים מודרניים)
 st.markdown("""
     <style>
-    /* עיצוב כללי ויישור לימין */
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
         direction: rtl !important;
         text-align: right !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     
-    /* עיצוב רקע כותרת האפליקציה */
     .main-title {
         background: linear-gradient(135deg, #1e3f20, #2d5a27);
         color: #f1e4c3 !important;
@@ -34,7 +32,6 @@ st.markdown("""
         color: #f1e4c3 !important;
     }
     
-    /* עיצוב שדות קלט (Input Box) */
     .stTextInput > div > div > input {
         direction: rtl !important;
         text-align: right !important;
@@ -46,16 +43,25 @@ st.markdown("""
         box-shadow: inset 0 1px 3px rgba(0,0,0,0.1) !important;
     }
     
-    /* עיצוב תיבות הודעה ותשובות */
     div[data-testid="stAlert"] {
         border-radius: 12px !important;
         border-right: 5px solid #2d5a27 !important;
         box-shadow: 0 4px 10px rgba(0,0,0,0.05) !important;
     }
     
-    /* טקסט נסתר בשביל הרובוטים של גוגל (SEO Keywords) */
     .seo-tags {
         display: none;
+    }
+    
+    /* עיצוב מיוחד לתיבת ההסבר על ה-API */
+    .api-explanation {
+        background-color: #f9f6f0;
+        border-right: 4px solid #d4af37;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        font-size: 14px;
+        line-height: 1.5;
     }
     </style>
     
@@ -74,13 +80,26 @@ st.markdown("""
 
 st.write("---")
 
-# 4. תיבת מפתח ה-API (אופציונלית)
-api_key = st.text_input("🔑 מפתח API לגישה לכל הידע בעולם (אופציונלי לשאלות בסיס):", type="password")
-st.markdown("[לחץ כאן לקבלת מפתח בחינם מגוגל](https://aistudio.google.com/)")
+# 4. הסבר על מפתח ה-API ותיבת הקלט
+st.markdown("### 🔑 שלב א': חיבור למוח המלא של ג'מי תורה")
+
+# תיבת ההסבר החדשה בשביל המשתמשים שלך!
+st.markdown("""
+<div class="api-explanation">
+    <strong>מה זה מפתח API (API Key)?</strong><br>
+    בלי המפתח, ג'מי תורה פועל על מאגר עצמאי ומכיר רק הלכות בסיסיות (כמו שבת, כשרות, ציצית ותפילין). <br>
+    כדי לשאול שאלות מורכבות יותר, לחפש פסוקים בתנ"ך או לבקש מקורות מכל הספרים שבעולם, האתר צריך להתחבר למוח של גוגל (Gemini AI). <br>
+    המפתח הוא קוד סודי וחינמי שמקשר בין האתר לבינה המלאכותית ומאפשר לו לדעת הכל מכל כל.
+</div>
+""", unsafe_allow_html=True)
+
+api_key = st.text_input("הדבק כאן את מפתח ה-API שלך (אופציונלי לשאלות בסיס):", type="password")
+st.markdown("[לחץ כאן לקבלת מפתח בחינם מגוגל (בחשבון מבוגר)](https://aistudio.google.com/)")
 st.write("---")
 
 # 5. תיבת השאלה של המשתמש
-user_question = st.text_input("🔮 מה תרצה לשאול את ג'מי תורה היום?")
+st.markdown("### 🔮 שלב ב': שאל שאלה")
+user_question = st.text_input("מה תרצה לשאול את ג'מי תורה היום?")
 
 # 6. מאגר המידע המקומי (לדברים הבסיסיים)
 KNOWLEDGE_BASE = {
