@@ -1,151 +1,95 @@
 import streamlit as st
-import pandas as pd
-import math
-from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# הגדרת כותרת האתר ומראה כללי
+st.set_page_config(page_title="ג'מיתורה והלכה", page_icon="📜", layout="centered")
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# עיצוב מותאם לעברית (מימין לשמאל) ויצירת מראה אלגנטי
+st.markdown("""
+    <style>
+    .reportview-container .main .block-container{ max-width: 700px; }
+    body, div, p, span, h1, h2, h3, .stMarkdown { text-align: right; direction: rtl; }
+    .stTextInput > div > div > input { text-align: right; direction: rtl; }
+    div[data-baseweb="select"] { direction: rtl; }
+    .stButton>button { width: 100%; background-color: #4CAF50; color: white; }
+    </style>
+    """, unsafe_allow_html=True)
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# כותרת ראשית ותיאור האתר
+st.title("📜 ג'מיתורה והלכה")
+st.subheader("עוזר בינה מלאכותית דייקן לתנ\"ך והלכה (גרסה רחבה 2.0)")
+st.write("---")
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+st.info("שלום עליכם! ברוכים הבאים לג'מיתורה המשודרגת. מה תרצו לדעת היום בתנ\"ך או בהלכה?")
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+# תיבת קלט שבה המשתמשים יכתבו את השאלה שלהם
+user_question = st.text_input("כתוב את שאלתך כאן (לדוגמה: שבת, תפילין, נטילת ידיים, כשרות, לשון הרע):")
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# בסיס הידע המורחב של ג'מיתורה
+KNOWLEDGE_BASE = {
+    "נטילת ידיים": """
+**הלכות נטילת ידיים בבוקר (מקור: קיצור שולחן ערוך, סימן ב'):**
+1. מיד כשקמים מהשינה, יש ליטול ידיים כדי להסיר רוח רעה שעליהן ולטהרן לעבודת הבורא.
+2. **סדר הנטילה:** נוטלים את הכלי ביד ימין, מעבירים לשמאל, ושופכים על יד ימין. לאחר מכן מעבירים ליד ימין ושופכים על שמאל. חוזרים על כך לסירוגין **3 פעמים** לכל יד.
+3. המים צריכים להגיע עד פרק כף היד (שורש היד).
+4. **אופן הברכה (חשוב מאוד!):** לאחר הנטילה והניגוב, **מגביהים את הידיים למעלה כנגד הפנים/הראש**, ומברכים: 
+*\"בָּרוּךְ אַתָּה ה' אֱלֹקֵינוּ מֶלֶך ְהָעוֹלָם, אֲשֶׁר קִדְּשָׁנוּ בְּמִצְוֹתָיו וְצִוָּנוּ עַל נְטִילַת יָדָיִם\"*.
+""",
+    "ציצית": """
+**הלכות ציצית (מקור: קיצור שולחן ערוך, סימן ט'):**
+1. מצוות עשה מן התורה לשים ציצית בכל בגד שיש לו ארבע כנפות (פינות) שמתכסים בו.
+2. זמן מצוות ציצית הוא ביום ולא בלילה.
+3. **הברכה על טלית קטן:** מברכים *\"בָּרוּךְ אַתָּה ה' אֱלֹקֵינוּ מֶלֶך ְהָעוֹלָם, אֲשֶׁר קִדְּשָׁנוּ בְּמִצְוֹתָיו וְצִוָּנוּ עַל מִצְוַת צִיצִית\"*.
+""",
+    "תפילין": """
+**הלכות תפילין (מקור: קיצור שולחן ערוך, סימן י'):**
+1. מצוות תפילין היא מצווה יקרת ערך ששקולה כנגד כל התורה כולה. מניחים אותה בכל יום חול (ולא בשבתות וימים טובים).
+2. **סדר ההנחה:** מניחים קודם את התפילין של יד על קיבורת הזרוע (היד החלשה), מברכים *\"להניח תפילין\"*, ומהדקים. לאחר מכן מניחים מיד את התפילין של ראש מעל המצח בדיוק באמצע, ומברכים (למנהג האשכנזים) *\"על מצוות תפילין\"*. 
+3. אסור להסיח את הדעת מהתפילין כל זמן שהן עליך.
+""",
+    "ברכות השחר": """
+**הלכות ברכות השחר (מקור: קיצור שולחן ערוך, סימן ז'):**
+1. כשניעור משנתו יודה לה' ויאמר \"מודה אני לפניך\".
+2. תקנו חז\"ל ברכות בכל בוקר על מנהגו של עולם (לבוש, ראייה, הליכה).
+3. אין לברך ברכות השחר או לקרוא קריאת שמע לפני שמנקים את הגוף ומנקים את הידיים בנטילה.
+""",
+    "שבת": """
+**הלכות שבת - יסודות (מקור: קיצור שולחן ערוך, סימן עב'):**
+1. **שמירת שבת:** השבת היא אות ברית בין עם ישראל לקב\"ה. יש להימנע מעשיית ל\"ט (39) מלאכות אסורות (כגון הבערת אש, כתיבה, בישול, קצירה ועוד).
+2. **נרות שבת:** חובה על כל בית בישראל להדליק נרות לכבוד שבת בערב שבת לפני שקיעת החמה כדי להרבות שלום בית.
+3. **קידוש:** מצוות עשה מן התורה לזכור את השבת בדברים, ולכן מייחדים ומקדשים אותה על כוס יין בכניסתה (בליל שבת) וביציאתה (בהבדלה).
+""",
+    "מזוזה": """
+**הלכות מזוזה (מקור: קיצור שולחן ערוך, סימן יא'):**
+1. מצוות עשה לקבוע מזוזה בכל פתחי הבית והחדרים שיש להם תקרה ומשמשים למגורי כבוד.
+2. **מיקום:** קובעים את המזוזה בשליש העליון של גובה הפתח, מצד ימין של הנכנס לחדר.
+3. יש לבדוק את כשרות המזוזות אצל סופר סת\"ם מומחה פעמיים בשבע שנים.
+""",
+    "כשרות": """
+**הלכות בשר וחלב (מקור: קיצור שולחן ערוך, סימן מו'):**
+1. התורה אסרה לבשל, לאכול או ליהנות מתערובת של בשר וחלב יחד.
+2. **המתנה:** לאחר אכילת בשר, יש להמתין **6 שעות** מלאות לפני שאוכלים מאכלי חלב. לאחר אכילת חלב, מספיק לשטוף את הפה ולאכול משהו מוצק, ומותר לאכול בשר מיד (למעט גבינה קשה שמצריכה המתנה).
+3. יש להקפיד על מערכות כלים, סכו\"ם וכיורים נפרדים לחלוטין לבשר ולחלב.
+""",
+    "לשון הרע": """
+**הלכות שמירת הלשון (מקור: ספר חפץ חיים):**
+1. איסור חמור מן התורה לספר בגנותו של חברו, אפילו אם הדברים שה שנאמרים הם אמת גמורה (זה נקרא לשון הרע). אם הדברים שקריים, זה נקרא \"מוציא שם רע\".
+2. אסור גם לקבל או להאמין ללשון הרע שנאמר על ידי אחרים.
+3. המרגל ומספר דברים שאיש פלוני אמר על אלמוני עובר משום איסור \"לא תלך רכיל בעמיך\".
+"""
+}
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+# מנוע החיפוש והתשובות של הבוט
+if user_question:
+    user_question_lower = user_question.lower()
+    found = False
+    
+    for key, response in KNOWLEDGE_BASE.items():
+        if key in user_question_lower or (key == "נטילת ידיים" and ("ידיים" in user_question_lower or "בוקר" in user_question_lower or "נטיל" in user_question_lower)) or (key == "כשרות" and ("בשר" in user_question_lower or "חלב" in user_question_lower)):
+            st.success(f"**תשובת ג'מיתורה:**")
+            st.markdown(response)
+            found = True
+            break
+            
+    if not found:
+        st.warning("**תשובת ג'מיתורה:**")
+        st.write("אני לא מוצא לכך מקור מפורש ומדויק במאגר שלי כרגע. כדי שלא להטעות חלילה, מומלץ לשאול רב פוסק.")
