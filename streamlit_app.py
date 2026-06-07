@@ -2,39 +2,87 @@ import streamlit as st
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# 1. הגדרת העמוד
-st.set_page_config(page_title="ג'מיתורה והלכה", page_icon="📜", layout="centered")
+# 1. הגדרות דף ומטא-דאטה בשביל גוגל (SEO)
+st.set_page_config(
+    page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית", 
+    page_icon="📜", 
+    layout="centered"
+)
 
-# 2. עיצוב לעברית (RTL) ותיבות טקסט נקיות
+# 2. עיצוב פרימיום (צבעי ירוק תורני, זהב, צללים ורדיוסים מודרניים)
 st.markdown("""
     <style>
+    /* עיצוב כללי ויישור לימין */
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
         direction: rtl !important;
         text-align: right !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
+    
+    /* עיצוב רקע כותרת האפליקציה */
+    .main-title {
+        background: linear-gradient(135deg, #1e3f20, #2d5a27);
+        color: #f1e4c3 !important;
+        padding: 25px;
+        border-radius: 15px;
+        text-align: center !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        margin-bottom: 25px;
+    }
+    .main-title h1, .main-title h3 {
+        text-align: center !important;
+        color: #f1e4c3 !important;
+    }
+    
+    /* עיצוב שדות קלט (Input Box) */
     .stTextInput > div > div > input {
         direction: rtl !important;
         text-align: right !important;
-        border: 2px solid #4CAF50;
-        border-radius: 8px;
+        border: 2px solid #2d5a27 !important;
+        border-radius: 12px !important;
+        padding: 12px !important;
+        font-size: 16px !important;
+        background-color: #fafafa !important;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.1) !important;
+    }
+    
+    /* עיצוב תיבות הודעה ותשובות */
+    div[data-testid="stAlert"] {
+        border-radius: 12px !important;
+        border-right: 5px solid #2d5a27 !important;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05) !important;
+    }
+    
+    /* טקסט נסתר בשביל הרובוטים של גוגל (SEO Keywords) */
+    .seo-tags {
+        display: none;
     }
     </style>
+    
+    <div class="seo-tags">
+        ג'מי תורה, ג'מיתורה, גמי תורה, גמיתורה, gemitorah, gemi torah, תנך, הלכה, שולחן ערוך
+    </div>
     """, unsafe_allow_html=True)
 
-# 3. כותרות האתר
-st.title("📜 ג'מיתורה והלכה")
-st.subheader("גרסת ה-Pro ההיברידית: חכם, מהיר ומחובר")
+# 3. באנר כותרת מעוצב
+st.markdown("""
+    <div class="main-title">
+        <h1>📜 ג'מי תורה</h1>
+        <h3>עוזר תורני דיגיטלי והלכתי חכם</h3>
+    </div>
+    """, unsafe_allow_html=True)
+
 st.write("---")
 
-# 4. תיבת מפתח ה-API (אופציונלית למתקדמים!)
-api_key = st.text_input("🔑 מפתח API לגישה לכל הידע בעולם (אופציונלי לבסיס):", type="password")
-st.markdown("[קישור לקבלת מפתח בחינם מגוגל](https://aistudio.google.com/)")
+# 4. תיבת מפתח ה-API (אופציונלית)
+api_key = st.text_input("🔑 מפתח API לגישה לכל הידע בעולם (אופציונלי לשאלות בסיס):", type="password")
+st.markdown("[לחץ כאן לקבלת מפתח בחינם מגוגל](https://aistudio.google.com/)")
 st.write("---")
 
 # 5. תיבת השאלה של המשתמש
-user_question = st.text_input("🔮 שאל את ג'מיתורה כל שאלה שקיימת בעולם:")
+user_question = st.text_input("🔮 מה תרצה לשאול את ג'מי תורה היום?")
 
-# 6. מאגר המידע המקומי (לדברים הבסיסיים - עובד תמיד בלי מפתח!)
+# 6. מאגר המידע המקומי (לדברים הבסיסיים)
 KNOWLEDGE_BASE = {
     "נטילת ידיים": """**הלכות נטילת ידיים בבוקר:**
 1. מיד כשקמים מהשינה, יש ליטול ידיים 3 פעמים לסירוגין על כל יד.
@@ -76,24 +124,21 @@ KNOWLEDGE_BASE = {
 3. אסור לרגל או ללכת רכיל (איסור 'לא תלך רכיל בעמיך')."""
 }
 
-# 7. מנוע החיפוש וההפעלה
 if user_question:
     user_question_lower = user_question.lower()
     found_local = False
     
-    # שלב א': בדיקה במאגר הבסיסי
     for key, response in KNOWLEDGE_BASE.items():
         if key in user_question_lower or (key == "נטילת ידיים" and ("ידיים" in user_question_lower or "בוקר" in user_question_lower or "נטיל" in user_question_lower)) or (key == "כשרות" and ("בשר" in user_question_lower or "חלב" in user_question_lower or "אוכל" in user_question_lower)) or (key == "ברכות" and ("ברכ" in user_question_lower or "אוכלים" in user_question_lower or "לברך" in user_question_lower)):
             st.balloons()
-            st.success("**תשובת ג'מיתורה (מתוך המאגר המהיר):**")
+            st.success("**תשובת ג'מי תורה:**")
             st.markdown(response)
             found_local = True
             break
             
-    # שלב ב': אם הנושא לא בסיסי, עוברים לבינה המלאכותית של גוגל
     if not found_local:
         if not api_key:
-            st.warning("⚠️ שאלת שאלה מורכבת! הנושא הזה לא נמצא במאגר הבסיסי שלי. כדי לפתוח את המוח המלא של ג'מיתורה שיודע הכל מכל כל, אנא הדבק את מפתח ה-API בתיבה למעלה.")
+            st.warning("⚠️ שאלת שאלה מורכבת! הנושא הזה לא נמצא במאגר הבסיסי שלי. כדי לפתוח את המוח המלא של ג'מי תורה שיודע הכל מכל כל, אנא הדבק את מפתח ה-API בתיבה למעלה.")
         else:
             try:
                 genai.configure(api_key=api_key)
@@ -106,12 +151,12 @@ if user_question:
                     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
                 }
                 
-                system_prompt = f"אתה עוזר תורני גאון בשם ג'מיתורה. ענה בעברית עם מקורות מדויקים על השאלה: {user_question}"
+                system_prompt = f"אתה עוזר תורני גאון בשם ג'מי תורה. ענה בעברית עם מקורות מדויקים על השאלה: {user_question}"
                 
-                with st.spinner("ג'מיתורה מעיין בכל הספרים שבעולם..."):
+                with st.spinner("ג'מי תורה מעיין בכל הספרים שבעולם..."):
                     response = model.generate_content(system_prompt, safety_settings=disable_safety)
                     st.balloons()
-                    st.success("**תשובת ג'מיתורה (בינה מלאכותית):**")
+                    st.success("**תשובת ג'מי תורה (בינה מלאכותית):**")
                     st.write(response.text)
                     
             except Exception as e:
