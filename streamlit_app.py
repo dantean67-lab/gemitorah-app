@@ -9,7 +9,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# 2. עיצוב פרימיום משופר (יישור לימין, תיבת מפתח מעוצבת וקטנה)
+# 2. עיצוב פרימיום (יישור לימין, תיבת מפתח מעוצבת וקטנה)
 st.markdown("""
     <style>
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
@@ -47,7 +47,6 @@ st.markdown("""
         border-right: 5px solid #2d5a27 !important;
     }
     
-    /* עיצוב תיבת דוגמאות בסיסיות */
     .examples-box {
         background-color: #f4f7f4;
         border: 1px dashed #2d5a27;
@@ -78,7 +77,6 @@ st.markdown("""
 # 4. הדבר הראשי: תיבת השאלה של המשתמש
 user_question = st.text_input("🔮 שאל את ג'מי תורה כל שאלה:")
 
-# הצגת דוגמאות למה שאפשר לשאול בלי מפתח
 st.markdown("""
 <div class="examples-box">
     💡 <strong>אפשר לשאול מיד (בלי מפתח):</strong> הלכות שבת, נטילת ידיים, ציצית, תפילין, כשרות (בשר וחלב), ברכות, מזוזה, לשון הרע.
@@ -87,14 +85,11 @@ st.markdown("""
 
 st.write("---")
 
-# 5. הרחבה אופציונלית בצד/למטה (Expander) - קטן, סגור ולא מציק!
+# 5. הרחבה אופציונלית בצד/למטה - תיקון הזחה קריטי כאן!
 with st.expander("🔑 חיבור למוח המלא של גוגל (אופציונלי - לשאלות מורכבות, תנ\"ך וגמרא)"):
     st.write("כדי לשאול שאלות מורכבות מעבר למאגר הבסיסי, יש להדביק מפתח API חינמי מחשבון גוגל של מבוגר.")
     api_key = st.text_input("הדבק כאן את מפתח ה-API שלך:", type="password")
     st.markdown("[לחץ כאן לקבלת מפתח בחינם מגוגל](https://aistudio.google.com/)")
-else:
-    # אם התיבה סגורה, המשתנה עדיין קיים כריק
-    api_key = ""
 
 # 6. מאגר המידע המקומי
 KNOWLEDGE_BASE = {
@@ -125,44 +120,4 @@ KNOWLEDGE_BASE = {
     "מזוזה": """**הלכות מזוזה:**
 1. מצוות עשה לקבוע מזוזה בכל פתחי הבית והחדרים המשמשים למגורים.
 2. קובעים את המזוזה בשליש העליון של גובה הפתח, מצד ימין של הנכנס.
-3. יש לבדוק את כשרות המזוזות אצל סופר סת"ם פעמיים ב-7 שנים.""",
-
-    "כשרות": """**הלכות בשר וחלב:**
-1. אסור לבשל, לאכול או ליהנות מתערובת של בשר וחלב יחד.
-2. המתנה: לאחר אכילת בשר, יש להמתין 6 שעות מלאות לפני שאוכלים מאכלי חלב.
-3. יש להקפיד על מערכות כלים וכיורים נפרדים לחלוטין לבשר ולחלב.""",
-
-    "לשון הרע": """**הלכות שמירת הלשון:**
-1. איסור חמור מן התורה לספר בגנותו של חברו, אפילו אם הדברים הם אמת גמורה.
-2. אסור לקבל או להאמין ללשון הרע שנאמר על ידי אחרים.
-3. אסור לרגל או ללכת רכיל (איסור 'לא תלך רכיל בעמיך')."""
-}
-
-if user_question:
-    user_question_lower = user_question.lower()
-    found_local = False
-    
-    for key, response in KNOWLEDGE_BASE.items():
-        if key in user_question_lower or (key == "נטילת ידיים" and ("ידיים" in user_question_lower or "בוקר" in user_question_lower or "נטיל" in user_question_lower)) or (key == "כשרות" and ("בשר" in user_question_lower or "חלב" in user_question_lower or "אוכל" in user_question_lower)) or (key == "ברכות" and ("ברכ" in user_question_lower or "אוכלים" in user_question_lower or "לברך" in user_question_lower)):
-            st.balloons()
-            st.success("**תשובת ג'מי תורה:**")
-            st.markdown(response)
-            found_local = True
-            break
-            
-    if not found_local:
-        if not api_key:
-            st.warning("⚠️ שאלת שאלה מורכבת! הנושא הזה לא נמצא במאגר הבסיסי שלי. כדי לפתוח את המוח המלא של ג'מי תורה שיודע הכל, פתח את הלשונית למטה והדבק מפתח API.")
-        else:
-            try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                
-                disable_safety = {
-                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                }
-                
-                system_prompt = f"אתה עוזר תורני גאון בשם ג'מי תורה. ענה בעברית עם מקורות מדויקים על השאלה
+3. יש לבדוק את כשרות המזוזות אצל סופר סת"ם פעמיים ב-
