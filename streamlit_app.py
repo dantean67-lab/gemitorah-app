@@ -1,9 +1,11 @@
 import streamlit as st
+import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# 1. הגדרות דף - חייב להיות פקודה ראשונה
+# 1. הגדרת העמוד (חייב להיות ראשון בקוד)
 st.set_page_config(page_title="ג'מיתורה והלכה", page_icon="📜", layout="centered")
 
-# 2. עיצוב CSS מתקדם (יישור ימינה, כרטיסיות יפות)
+# 2. עיצוב לעברית (RTL) ותיבות טקסט נקיות
 st.markdown("""
     <style>
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
@@ -14,79 +16,57 @@ st.markdown("""
         direction: rtl !important;
         text-align: right !important;
         border: 2px solid #4CAF50;
-        border-radius: 10px;
-    }
-    div[data-testid="stAlert"] {
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        border-radius: 8px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. כותרות
+# 3. כותרות האתר
 st.title("📜 ג'מיתורה והלכה")
-st.subheader("גרסת Pro: העוזר התורני הדיגיטלי שלך")
-st.markdown("---")
-st.info("💡 **טיפ:** חפש מילות מפתח כמו: שבת, תפילין, כשרות, ציצית, נטילת ידיים, ברכות, מזוזה, לשון הרע.")
+st.subheader("גרסת ה-Pro האולטימטיבית: יודע הכל מכל כל")
+st.write("---")
 
-# 4. תיבת חיפוש
-user_question = st.text_input("מה תרצה לדעת היום בהלכה?")
+# 4. הגדרת מפתח ה-API ישירות על המסך
+api_key = st.text_input("🔑 שלב א': הדבק כאן את מפתח ה-API שלך:", type="password")
+st.markdown("[קישור ישיר לקבלת מפתח בחינם מגוגל (בחשבון מבוגר)](https://aistudio.google.com/)")
+st.write("---")
 
-# 5. מאגר המידע (בנוי בצורה חסינה משגיאות עם גרשיים משולשים)
-KNOWLEDGE_BASE = {
-    "נטילת ידיים": """**הלכות נטילת ידיים בבוקר:**
-1. מיד כשקמים מהשינה, יש ליטול ידיים 3 פעמים לסירוגין על כל יד.
-2. המים צריכים להגיע עד פרק כף היד (שורש היד).
-3. **אופן הברכה:** לאחר הנטילה והניגוב, מגביהים את הידיים למעלה כנגד הפנים או הראש, ומברכים על נטילת ידיים.""",
+# 5. תיבת השאלה של המשתמש
+user_question = st.text_input("🔮 שלב ב': שאל את ג'מיתורה כל שאלה שקיימת בעולם (תנ\"ך, הלכה, גמרא):")
 
-    "ציצית": """**הלכות ציצית:**
-1. מצוות עשה מן התורה לשים ציצית בכל בגד שיש לו ארבע כנפות שמתכסים בו.
-2. זמן מצוות ציצית הוא ביום ולא בלילה.
-3. על טלית קטן מברכים: 'על מצוות ציצית'.""",
-
-    "תפילין": """**הלכות תפילין:**
-1. מצווה שיש להניח בכל יום חול (לא בשבת וימים טובים).
-2. סדר ההנחה: מניחים קודם תפילין של יד על הזרוע, מברכים 'להניח תפילין' ומהדקים. לאחר מכן מניחים תפילין של ראש מעל המצח באמצע.
-3. אסור להסיח את הדעת מהתפילין כל זמן שהן עליך.""",
-
-    "ברכות": """**הלכות ברכות:**
-1. מודה אני: אומרים מיד כשמתעוררים בבוקר.
-2. ברכות הנהנין: על לחם מברכים 'המוציא', על מאפים 'מזונות', על פירות העץ 'בורא פרי העץ', על ירקות 'בורא פרי האדמה', ועל מים/משקאות 'שהכל נהיה בדברו'.""",
-
-    "שבת": """**הלכות שבת:**
-1. יש להימנע מעשיית 39 מלאכות אסורות מהתורה (כמו הבערת אש, בישול, כתיבה ועוד - אלו נקראות ל"ט מלאכות).
-2. הדלקת נרות: חובה להדליק נרות לכבוד שבת לפני שקיעת החמה.
-3. קידוש: מצווה מהתורה לקדש את השבת על כוס יין בכניסתה (בליל שבת) וביציאתה (בהבדלה).""",
-
-    "מזוזה": """**הלכות מזוזה:**
-1. מצוות עשה לקבוע מזוזה בכל פתחי הבית והחדרים המשמשים למגורים.
-2. קובעים את המזוזה בשליש העליון של גובה הפתח, מצד ימין של הנכנס.
-3. יש לבדוק את כשרות המזוזות אצל סופר סת"ם פעמיים ב-7 שנים.""",
-
-    "כשרות": """**הלכות בשר וחלב:**
-1. אסור לבשל, לאכול או ליהנות מתערובת של בשר וחלב יחד.
-2. המתנה: לאחר אכילת בשר, יש להמתין 6 שעות מלאות לפני שאוכלים מאכלי חלב.
-3. יש להקפיד על מערכות כלים וכיורים נפרדים לחלוטין לבשר ולחלב.""",
-
-    "לשון הרע": """**הלכות שמירת הלשון:**
-1. איסור חמור מן התורה לספר בגנותו של חברו, אפילו אם הדברים הם אמת גמורה.
-2. אסור לקבל או להאמין ללשון הרע שנאמר על ידי אחרים.
-3. אסור לרגל או ללכת רכיל (איסור 'לא תלך רכיל בעמיך')."""
-}
-
-# 6. מנוע החיפוש והתצוגה
+# 6. מנוע הבינה המלאכותית
 if user_question:
-    user_question_lower = user_question.lower()
-    found = False
-    
-    for key, response in KNOWLEDGE_BASE.items():
-        if key in user_question_lower or (key == "נטילת ידיים" and ("ידיים" in user_question_lower or "בוקר" in user_question_lower or "נטיל" in user_question_lower)) or (key == "כשרות" and ("בשר" in user_question_lower or "חלב" in user_question_lower or "אוכל" in user_question_lower)) or (key == "ברכות" and ("ברכ" in user_question_lower or "אוכלים" in user_question_lower or "לברך" in user_question_lower)):
-            st.balloons() # הפעלת אנימציית בלונים!
-            st.success("**תשובת ג'מיתורה:**")
-            st.markdown(response)
-            found = True
-            break
+    if not api_key:
+        st.error("❌ הבוט לא יכול לגשת לכל הידע שבעולם בלי מפתח. אנא הדבק את המפתח בתיבה למעלה!")
+    else:
+        try:
+            # חיבור לגוגל
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
-    if not found:
-        st.warning("**תשובת ג'מיתורה:**")
-        st.write("הנושא הספציפי הזה לא נמצא כרגע במאגר הבטוח שלי. כדי לא להטעות חלילה, עיין בשולחן ערוך או שאל רב.")
+            # כיבוי מוחלט של כל מסנני הבטיחות כדי למנוע את הודעות הסירוב המציקות של גוגל
+            disable_safety = {
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+            }
+            
+            # הגדרת פקודה חזקה לבוט
+            system_prompt = f"""
+            אתה עוזר תורני גאון ועצום בשם ג'מיתורה שיודע את כל התורה, התנ"ך, המשנה, הגמרא וההלכה מכל כל.
+            תפקידך לענות בעברית רהוטה, ברורה ומדויקת על השאלה: "{user_question}".
+            הבא מקורות מדויקים מהספרים (ספר, פרק, פסוק, סימן או סעיף) לכל דבר שאתה אומר.
+            """
+            
+            with st.spinner("ג'מיתורה מעיין בכל הספרים שבעולם..."):
+                # שליחת הבקשה עם הגדרות הבטיחות המבוטלות
+                response = model.generate_content(system_prompt, safety_settings=disable_safety)
+                
+                # הצגת התשובה רק כשהיא מוכנה לחלוטין
+                st.balloons()
+                st.success("**תשובת ג'מיתורה:**")
+                st.write(response.text)
+                
+        except Exception as e:
+            st.error(f"שגיאה בהפעלת ה-AI. ודא שהקוד שהדבקת תקין. פרטי שגיאה: {e}")
