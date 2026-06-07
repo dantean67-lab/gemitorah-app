@@ -9,7 +9,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# 2. עיצוב פרימיום (צבעי ירוק תורני, זהב, צללים ורדיוסים מודרניים)
+# 2. עיצוב פרימיום משופר (יישור לימין, תיבת מפתח מעוצבת וקטנה)
 st.markdown("""
     <style>
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
@@ -21,11 +21,11 @@ st.markdown("""
     .main-title {
         background: linear-gradient(135deg, #1e3f20, #2d5a27);
         color: #f1e4c3 !important;
-        padding: 25px;
+        padding: 20px;
         border-radius: 15px;
         text-align: center !important;
         box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        margin-bottom: 25px;
+        margin-bottom: 20px;
     }
     .main-title h1, .main-title h3 {
         text-align: center !important;
@@ -37,31 +37,28 @@ st.markdown("""
         text-align: right !important;
         border: 2px solid #2d5a27 !important;
         border-radius: 12px !important;
-        padding: 12px !important;
+        padding: 10px !important;
         font-size: 16px !important;
         background-color: #fafafa !important;
-        box-shadow: inset 0 1px 3px rgba(0,0,0,0.1) !important;
     }
     
     div[data-testid="stAlert"] {
         border-radius: 12px !important;
         border-right: 5px solid #2d5a27 !important;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.05) !important;
+    }
+    
+    /* עיצוב תיבת דוגמאות בסיסיות */
+    .examples-box {
+        background-color: #f4f7f4;
+        border: 1px dashed #2d5a27;
+        padding: 12px;
+        border-radius: 10px;
+        margin-top: 5px;
+        font-size: 14px;
     }
     
     .seo-tags {
         display: none;
-    }
-    
-    /* עיצוב מיוחד לתיבת ההסבר על ה-API */
-    .api-explanation {
-        background-color: #f9f6f0;
-        border-right: 4px solid #d4af37;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-        font-size: 14px;
-        line-height: 1.5;
     }
     </style>
     
@@ -78,30 +75,28 @@ st.markdown("""
     </div>
     """, unsafe_allow_html=True)
 
-st.write("---")
+# 4. הדבר הראשי: תיבת השאלה של המשתמש
+user_question = st.text_input("🔮 שאל את ג'מי תורה כל שאלה:")
 
-# 4. הסבר על מפתח ה-API ותיבת הקלט
-st.markdown("### 🔑 שלב א': חיבור למוח המלא של ג'מי תורה")
-
-# תיבת ההסבר החדשה בשביל המשתמשים שלך!
+# הצגת דוגמאות למה שאפשר לשאול בלי מפתח
 st.markdown("""
-<div class="api-explanation">
-    <strong>מה זה מפתח API (API Key)?</strong><br>
-    בלי המפתח, ג'מי תורה פועל על מאגר עצמאי ומכיר רק הלכות בסיסיות (כמו שבת, כשרות, ציצית ותפילין). <br>
-    כדי לשאול שאלות מורכבות יותר, לחפש פסוקים בתנ"ך או לבקש מקורות מכל הספרים שבעולם, האתר צריך להתחבר למוח של גוגל (Gemini AI). <br>
-    המפתח הוא קוד סודי וחינמי שמקשר בין האתר לבינה המלאכותית ומאפשר לו לדעת הכל מכל כל.
+<div class="examples-box">
+    💡 <strong>אפשר לשאול מיד (בלי מפתח):</strong> הלכות שבת, נטילת ידיים, ציצית, תפילין, כשרות (בשר וחלב), ברכות, מזוזה, לשון הרע.
 </div>
 """, unsafe_allow_html=True)
 
-api_key = st.text_input("הדבק כאן את מפתח ה-API שלך (אופציונלי לשאלות בסיס):", type="password")
-st.markdown("[לחץ כאן לקבלת מפתח בחינם מגוגל (בחשבון מבוגר)](https://aistudio.google.com/)")
 st.write("---")
 
-# 5. תיבת השאלה של המשתמש
-st.markdown("### 🔮 שלב ב': שאל שאלה")
-user_question = st.text_input("מה תרצה לשאול את ג'מי תורה היום?")
+# 5. הרחבה אופציונלית בצד/למטה (Expander) - קטן, סגור ולא מציק!
+with st.expander("🔑 חיבור למוח המלא של גוגל (אופציונלי - לשאלות מורכבות, תנ\"ך וגמרא)"):
+    st.write("כדי לשאול שאלות מורכבות מעבר למאגר הבסיסי, יש להדביק מפתח API חינמי מחשבון גוגל של מבוגר.")
+    api_key = st.text_input("הדבק כאן את מפתח ה-API שלך:", type="password")
+    st.markdown("[לחץ כאן לקבלת מפתח בחינם מגוגל](https://aistudio.google.com/)")
+else:
+    # אם התיבה סגורה, המשתנה עדיין קיים כריק
+    api_key = ""
 
-# 6. מאגר המידע המקומי (לדברים הבסיסיים)
+# 6. מאגר המידע המקומי
 KNOWLEDGE_BASE = {
     "נטילת ידיים": """**הלכות נטילת ידיים בבוקר:**
 1. מיד כשקמים מהשינה, יש ליטול ידיים 3 פעמים לסירוגין על כל יד.
@@ -157,7 +152,7 @@ if user_question:
             
     if not found_local:
         if not api_key:
-            st.warning("⚠️ שאלת שאלה מורכבת! הנושא הזה לא נמצא במאגר הבסיסי שלי. כדי לפתוח את המוח המלא של ג'מי תורה שיודע הכל מכל כל, אנא הדבק את מפתח ה-API בתיבה למעלה.")
+            st.warning("⚠️ שאלת שאלה מורכבת! הנושא הזה לא נמצא במאגר הבסיסי שלי. כדי לפתוח את המוח המלא של ג'מי תורה שיודע הכל, פתח את הלשונית למטה והדבק מפתח API.")
         else:
             try:
                 genai.configure(api_key=api_key)
@@ -170,13 +165,4 @@ if user_question:
                     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
                 }
                 
-                system_prompt = f"אתה עוזר תורני גאון בשם ג'מי תורה. ענה בעברית עם מקורות מדויקים על השאלה: {user_question}"
-                
-                with st.spinner("ג'מי תורה מעיין בכל הספרים שבעולם..."):
-                    response = model.generate_content(system_prompt, safety_settings=disable_safety)
-                    st.balloons()
-                    st.success("**תשובת ג'מי תורה (בינה מלאכותית):**")
-                    st.write(response.text)
-                    
-            except Exception as e:
-                st.error(f"שגיאה בהפעלת ה-AI: {e}")
+                system_prompt = f"אתה עוזר תורני גאון בשם ג'מי תורה. ענה בעברית עם מקורות מדויקים על השאלה
