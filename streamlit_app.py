@@ -44,6 +44,12 @@ st.markdown("""
         border-radius: 12px !important;
         border-right: 5px solid #2d5a27 !important;
     }
+    .disclaimer-text {
+        text-align: center !important;
+        color: #888888;
+        font-size: 13px;
+        margin-top: 30px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -57,6 +63,10 @@ st.markdown("""
 
 # 4. תיבת השאלה
 user_question = st.text_input("🔮 שאל את ג'מי תורה כל שאלה בתורה, בהלכה, בקיצור שולחן ערוך ובגמרא:")
+
+# הוספת הכתב הקטן של האזהרה ישר מתחת לתיבת השאלה
+st.markdown('<div class="disclaimer-text">⚠️ ג\'מי תורה עלול לטעות, לכן תמיד מומלץ לבדוק אותו או לשאול רב בעניינים חשובים ולהלכה למעשה.</div>', unsafe_allow_html=True)
+
 st.write("---")
 
 # 5. הפעלת מנוע הבינה המלאכותית באמצעות המפתח המוחבא ב-Secrets
@@ -67,7 +77,9 @@ if user_question:
         try:
             # חיבור אוטומטי למפתח הסודי
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # עדכון שם המודל לגרסה החדשה והנתמכת (gemini-1.5-flash-latest)
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
             
             disable_safety = {
                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
