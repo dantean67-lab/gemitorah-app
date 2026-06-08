@@ -10,7 +10,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# 2. עיצוב CSS מתוקן (מחיקת המסגרת המרובעת החיצונית)
+# 2. עיצוב CSS
 st.markdown("""
     <style>
     * {
@@ -77,7 +77,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 3. הצגת הכותרת המקורית
+# 3. הצגת הכותרת
 st.markdown("""
     <div class="premium-header">
         <h1>📜 ג'מי תורה</h1>
@@ -99,8 +99,8 @@ if user_question:
         try:
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
             
-            # ✨ התיקון הקריטי: שימוש במודל היציב שעובד ב-100% מהשרתים
-            model = genai.GenerativeModel('gemini-pro')
+            # חזרנו למודל החדש והטוב ביותר, שנעדכן את השרת לקרוא
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             disable_safety = {
                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -116,17 +116,15 @@ if user_question:
             with st.spinner("הרב מעיין במקורות ומנסח תשובה..."):
                 response = model.generate_content(system_prompt, safety_settings=disable_safety)
                 
-                # הצגת שאלת המשתמש
                 with st.chat_message("user"):
                     st.write(f"**השאלה שלי:** {user_question}")
                 
-                # בדיקה ודאית לתמונת הרב (אם הקובץ לא נטען טוב, יוצג סמל כדי שלא יקרוס)
+                # בדיקה לתמונת הרב
                 if os.path.exists("rabbi.jpeg"):
                     rabbi_avatar = "rabbi.jpeg"
                 else:
                     rabbi_avatar = "📜" 
                 
-                # הצגת תשובת הרב עם האווטאר
                 with st.chat_message("assistant", avatar=rabbi_avatar):
                     st.write(response.text)
                     
