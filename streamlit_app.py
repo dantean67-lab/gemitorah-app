@@ -64,12 +64,12 @@ st.markdown("""
 # 4. תיבת השאלה
 user_question = st.text_input("🔮 שאל את ג'מי תורה כל שאלה בתורה, בהלכה, בקיצור שולחן ערוך ובגמרא:")
 
-# הוספת הכתב הקטן של האזהרה ישר מתחת לתיבת השאלה
+# הוספת הכתב הקטן של האזהרה ישר מתחת לתיבת השאלה (שכבר עובדת לך פיקס!)
 st.markdown('<div class="disclaimer-text">⚠️ ג\'מי תורה עלול לטעות, לכן תמיד מומלץ לבדוק אותו או לשאול רב בעניינים חשובים ולהלכה למעשה.</div>', unsafe_allow_html=True)
 
 st.write("---")
 
-# 5. הפעלת מנוע הבינה המלאכותית באמצעות המפתח המוחבא ב-Secrets
+# 5. הפעלת מנוע הבינה המלאכותית
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ שגיאה: המפתח לא נקרא בהצלחה מה-Secrets. ודא שלחצת Save changes באתר של Streamlit.")
@@ -78,8 +78,8 @@ if user_question:
             # חיבור אוטומטי למפתח הסודי
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
             
-            # עדכון שם המודל לגרסה החדשה והנתמכת (gemini-1.5-flash-latest)
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            # >>> הנה התיקון הקריטי! שימוש בגרסה 3 שקיימת אצלך בחשבון <<<
+            model = genai.GenerativeModel('gemini-3-flash-preview')
             
             disable_safety = {
                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -88,7 +88,6 @@ if user_question:
                 HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
             }
             
-            # הנחיה לבוט שיהיה תלמיד חכם עצום
             system_prompt = f"""אתה פוסק הלכה ועוזר תורני גאון ובקיא עצום בשם ג'מי תורה.
             תפקידך לענות על שאלות בצורה המפורטת והעשירה ביותר (לא בקצרה!).
             יש לך ידע מוחלט בכל התנ"ך, המשנה, הגמרא (בבלי וירושלמי), השולחן ערוך, וקיצור שולחן ערוך.
