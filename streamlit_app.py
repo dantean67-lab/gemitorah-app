@@ -2,159 +2,151 @@ import streamlit as st
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# 1. הגדרות דף - רוחב מלא (Wide)
+# 1. הגדרות דף קבועות - רוחב מלא
 st.set_page_config(
-    page_title="שו\"ת - הרב ג'מי הדיגיטלי", 
+    page_title="הרב הדיגיטלי", 
     page_icon="📜", 
     layout="wide"
 )
 
-# 2. ארכיטקטורת עיצוב פרימיום לצ'אט (CSS)
+# 2. עיצוב פרימיום נקי ומאוזן (CSS) - מיושר ונוח לקריאה
 st.markdown("""
     <style>
-    /* הגדרת כיוון גלובלי וגופן */
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
         direction: rtl !important;
         text-align: right !important;
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
     
-    /* הגבלת רוחב אזור העבודה כדי שלא ייראה מתוח מדי בצדדים */
+    /* מרכז את התוכן ברוחב נוח שלא נמתח מדי לצדדים */
     .block-container {
-        max-width: 1000px !important;
+        max-width: 950px !important;
         padding-top: 2rem !important;
         padding-bottom: 2rem !important;
         margin: 0 auto !important;
     }
     
-    /* באנר עליון מודרני ונקי - כחול לילה וזהב */
+    /* באנר עליון יוקרתי ומקצועי */
     .chat-header {
-        background: linear-gradient(135deg, #0d1b2a, #1b263b);
-        border: 1px solid #304563;
-        border-right: 5px solid #d4af37;
-        padding: 25px;
+        background: linear-gradient(135deg, #0f1d2a, #1a2e40);
+        border: 1px solid #2c3e50;
+        border-right: 5px solid #c5a059;
+        padding: 30px;
         border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         margin-bottom: 30px;
         text-align: center !important;
     }
     .chat-header h1 {
-        color: #f4ecd8 !important;
-        font-size: 2.2rem !important;
+        color: #f4edd8 !important;
+        font-size: 2.4rem !important;
         font-weight: 700;
-        margin: 0 0 5px 0 !important;
+        margin: 0 0 8px 0 !important;
         text-align: center !important;
     }
     .chat-header p {
-        color: #e0e1dd !important;
-        font-size: 1.1rem !important;
+        color: #c5a059 !important;
+        font-size: 1.15rem !important;
         margin: 0 !important;
         text-align: center !important;
     }
     
-    /* עיצוב שדה הקלט של השאלה */
+    /* תיבת הזנת שאלה */
     .stTextInput > div > div > input {
         direction: rtl !important;
         text-align: right !important;
-        border: 2px solid #415a77 !important;
-        border-radius: 25px !important; /* מעוגל כמו שדה הודעה */
+        border: 2px solid #2c3e50 !important;
+        border-radius: 25px !important;
         padding: 14px 20px !important;
-        font-size: 16px !important;
-        background-color: #0d1b2a !important;
+        font-size: 16.5px !important;
+        background-color: #141617 !important;
         color: #ffffff !important;
     }
     .stTextInput > div > div > input:focus {
-        border-color: #d4af37 !important;
-        box-shadow: 0 0 10px rgba(212, 175, 55, 0.2);
+        border-color: #c5a059 !important;
     }
     
-    /* מכולת הצ'אט הכללית */
-    .chat-wrapper {
-        margin-top: 30px;
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-    }
-    
-    /* בועת השאלה של המשתמש (מיושרת לשמאל, צבע כחול-אפרפר) */
+    /* בועת השאלה שלי */
     .user-bubble-container {
         display: flex;
         justify-content: flex-end;
         width: 100%;
+        margin-top: 20px;
     }
     .user-bubble {
-        background-color: #415a77;
+        background-color: #2c3e50;
         color: #ffffff;
-        padding: 15px 20px;
+        padding: 14px 20px;
         border-radius: 20px 20px 4px 20px;
-        max-width: 75%;
+        max-width: 80%;
         box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         font-size: 16px;
     }
     
-    /* בועת התשובה של הרב (מיושרת לימין, כוללת תמונה) */
+    /* בועת התשובה של הרב */
     .rabbi-chat-row {
         display: flex;
         align-items: flex-start;
         gap: 15px;
         width: 100%;
-        margin-top: 10px;
+        margin-top: 15px;
     }
     .rabbi-image-circle {
         width: 60px;
         height: 60px;
         border-radius: 50%;
-        border: 2px solid #d4af37;
+        border: 2px solid #c5a059;
         object-fit: cover;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        background-color: #1a2e40;
     }
     .rabbi-bubble {
-        background-color: #1b263b;
-        border: 1px solid #304563;
-        border-right: 4px solid #d4af37;
-        color: #e0e1dd;
+        background-color: #141617;
+        border: 1px solid #2c3e50;
+        border-right: 4px solid #c5a059;
+        color: #e0e0e0;
         padding: 22px;
-        border-radius: 20px 4px 20px 20px;
+        border-radius: 4px 20px 20px 20px;
         flex-grow: 1;
         box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         font-size: 17px;
         line-height: 1.7;
     }
     
-    /* צבע זהב לכותרות בתוך דברי הרב */
+    /* עיצוב כותרות פנימיות של סעיפים */
     .rabbi-bubble h1, .rabbi-bubble h2, .rabbi-bubble h3 {
-        color: #d4af37 !important;
-        margin-top: 15px !important;
+        color: #c5a059 !important;
+        font-size: 1.25rem !important;
+        margin-top: 18px !important;
         margin-bottom: 8px !important;
     }
     
     .disclaimer {
         text-align: center !important;
-        color: #6c757d;
+        color: #8a8a8a;
         font-size: 13px;
         margin-top: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. באנר עליון נקי
+# 3. באנר עליון נקי לכולם
 st.markdown("""
     <div class="chat-header">
-        <h1>📜 שאל את הרב ג'מי</h1>
-        <p>מערכת שו\"ת דיגיטלית אישית להלכה וללימוד תורני</p>
+        <h1>📜 הרב הדיגיטלי</h1>
+        <p>תשובות ברורות, ישירות והלכה למעשה בגובה העיניים</p>
     </div>
     """, unsafe_allow_html=True)
 
-# 4. הזנת השאלה
-user_question = st.text_input("💬 כתוב כאן את שאלתך לרב...")
-st.markdown('<div class="disclaimer">⚠️ לתשומת לבך: הרב הדיגיטלי הוא כלי עזר מבוסס AI ועלול לטעות. להלכה למעשה יש לפנות לרב מורה הוראה.</div>', unsafe_allow_html=True)
+# 4. שדה קלט לשאלה
+user_question = st.text_input("💬 כתוב כאן את שאלתך להרב...")
+st.markdown('<div class="disclaimer">⚠️ לתשומת לבך: המערכת נועדה ללימוד והבנה עקרונית. למעשה ובמקרים של ספק, תמיד כדאי להתייעץ עם רב הקהילה או פוסק הלכה.</div>', unsafe_allow_html=True)
 
 st.write("---")
 
-# 5. ריצת המודל והצגת חלון הצ'אט
+# 5. עיבוד והצגת התשובה הברורה והישירה
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
-        st.error("⚠️ שגיאה: מפתח ה-API לא מוגדר ב-Secrets.")
+        st.error("⚠️ שגיאה: מפתח ה-API חסר בהגדרות המערכת.")
     else:
         try:
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -167,52 +159,45 @@ if user_question:
                 HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
             }
             
-            system_prompt = f"""אתה הרב ג'מי - תלמיד חכם עצום, פוסק הלכה חם ורחב אופקים.
-            אל תדבר בשום אופן כמו תוכנה או AI. התשובות שלך צריכות להיות אנושיות, מכובדות ומאירות פנים.
+            # הגדרת פרומפט חדה: תשובה ברורה, פשוטה, שורה תחתונה בהתחלה וללא פלפולים ארוכים
+            system_prompt = f"""אתה "הרב הדיגיטלי" - תלמיד חכם המשיב לשאלות הציבור בצורה הברורה, המדויקת והפשוטה ביותר שיש.
+            אל תדבר בשום אופן כמו בינה מלאכותית או רובוט. כתוב בצורה אנושית ומכובדת, אך קצרה ולעניין.
             
-            מבנה התשובה:
-            1. פתח בברכה לבבית המותאמת לשאלה (למשל: "שלום וברכה ללומד היקר והחשוב", "שאלתך נפלאה ויסודית").
-            2. השתמש בשפה תורנית עשירה ומכובדת, וחלק את הנושא לסעיפים ברורים (א., ב., ג.) עם כותרות.
-            3. הבא מקורות מדויקים מהפסוקים, מהגמרא, מהשולחן ערוך או מהפוסקים האחרונים.
-            4. חתום תמיד בברכת תורה חמה (למשל: "בברכה להצלחה בכל מעשי ידיך ובתלמודך, הרב ג'מי").
+            חוקי המענה שלך:
+            1. פתח בברכה קצרה ומכובדת (למשל: "שלום וברכה", "שאלתך חשובה מאוד").
+            2. השורה התחתונה קודם: תן מיד בסעיף הראשון את התשובה הישירה והברורה למעשה (למשל: מה הדין או מה מברכים).
+            3. הסבר קצר: תן הסבר תמציתי ופשוט בשפה ברורה ללא מילים בארמית או פלפולים ארוכים.
+            4. מקורות: ציין מקור מדויק (כמו גמרא או שולחן ערוך) בצורה פשוטה בעברית.
+            5. סיים בברכה קצרה.
             
-            השאלה של הלומד: {user_question}"""
+            השאלה של הפונה: {user_question}"""
             
-            with st.spinner("הרב מעיין במקורות ומנסח תשובה..."):
+            with st.spinner("הרב מעיין במקורות ומנסח תשובה ברורה..."):
                 response = model.generate_content(system_prompt, safety_settings=disable_safety)
                 st.balloons()
                 
-                # יצירת אזור הצ'אט המשולב
-                st.markdown('<div class="chat-wrapper">', unsafe_allow_html=True)
+                # תמונת פרופיל קלאסית ומכובדת
+                rabbi_img_url = "https://cdn-icons-png.flaticon.com/512/3404/3404571.png"
                 
-                # 1. הצגת השאלה של המשתמש בבועה שמאלית
+                # תצוגת התכתבות הצ'אט
                 st.markdown(f"""
                     <div class="user-bubble-container">
                         <div class="user-bubble">
-                            <strong>השאלה שלי:</strong><br>{user_question}
+                            <strong>השאלה שלי:</strong> {user_question}
                         </div>
                     </div>
-                """, unsafe_allow_html=True)
-                
-                # 2. הצגת התשובה של הרב בבועה ימנית עם תמונת אווטאר אמיתית
-                # השתמשנו כאן בתמונה ציבורית ואיכותית של דמות רב מאוירת/דיגיטלית מכובדת
-                rabbi_img_url = "https://cdn-icons-png.flaticon.com/512/3404/3404571.png" 
-                
-                st.markdown(f"""
+                    
                     <div class="rabbi-chat-row">
-                        <img class="rabbi-image-circle" src="{rabbi_img_url}" alt="הרב ג'מי">
+                        <img class="rabbi-image-circle" src="{rabbi_img_url}">
                         <div class="rabbi-bubble">
                 """, unsafe_allow_html=True)
                 
-                # הדפסת טקסט התשובה בתוך הבועה
                 st.write(response.text)
                 
-                # סגירת תגיות ה-HTML של הצ'אט
                 st.markdown("""
                         </div>
                     </div>
-                </div>
                 """, unsafe_allow_html=True)
                 
         except Exception as e:
-            st.error(f"חלה שגיאה: {e}")
+            st.error(f"חלה שגיאה בתקשורת: {e}")
