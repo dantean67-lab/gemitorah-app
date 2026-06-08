@@ -1,7 +1,6 @@
-import streamlit as st
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import os
+import streamlit as st
+import requests
 
 # 1. הגדרות דף
 st.set_page_config(
@@ -10,14 +9,13 @@ st.set_page_config(
     layout="centered"
 )
 
-# 2. עיצוב CSS
+# 2. עיצוב CSS יוקרתי ונקי (ללא מסגרות מיותרות)
 st.markdown("""
     <style>
     * {
         direction: rtl;
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
-    
     .premium-header {
         text-align: center;
         padding: 2.5rem 1.5rem;
@@ -40,13 +38,11 @@ st.markdown("""
         margin-top: 8px !important;
         opacity: 0.9;
     }
-    
     div[data-baseweb="base-input"] {
         border: none !important;
         background: transparent !important;
         box-shadow: none !important;
     }
-    
     div[data-baseweb="input"] {
         border: 1px solid #2c3e50 !important;
         background-color: #141617 !important;
@@ -58,7 +54,6 @@ st.markdown("""
         border-color: #c5a059 !important;
         box-shadow: 0 0 10px rgba(197, 160, 89, 0.25) !important;
     }
-    
     .disclaimer-text {
         text-align: center;
         color: #888888;
@@ -66,7 +61,6 @@ st.markdown("""
         margin-top: 12px;
         font-weight: 400;
     }
-    
     .stChatMessage {
         background-color: #181b1c !important;
         border: 1px solid #25292b !important;
@@ -87,46 +81,77 @@ st.markdown("""
 
 # 4. שדה הקלט
 user_question = st.text_input("💬 שאל את ג'מי תורה כל שאלה בתורה, בהלכה ובגמרא:")
-st.markdown('<div class="disclaimer-text">⚠️ לתשומת ליבך, הרב הדיגיטלי יכול לטעות ובמקרים של ספק או הלכות למעשה תמיד מומלץ לשאול רב.</div>', unsafe_allow_html=True)
-
+st.markdown(
+    '<div class="disclaimer-text">⚠️ לתשומת ליבך, הרב הדיגיטלי יכול לטעות '
+    'ובמקרים של ספק או הלכות למעשה תמיד מומלץ לשאול רב.</div>', 
+    unsafe_allow_html=True
+)
 st.write("---")
 
-# 5. מנגנון הצ'אט וה-AI
+# 5. מנגנון הצ'אט וה-AI בפנייה ישירה
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ מפתח ה-API חסר בהגדרות ה-Secrets של Streamlit.")
     else:
-        try:
-            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            
-            # חזרנו למודל החדש והטוב ביותר, שנעדכן את השרת לקרוא
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            disable_safety = {
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            }
-            
-            system_prompt = f"""אתה "הרב הדיגיטלי" במערכת "ג'מי תורה". השב על השאלה הבאה בצורה הברורה, הפשוטה והישירה ביותר.
-            חוקים: פתח בברכת שלום קצרה, תן את התשובה והשורה התחתונה מיד בהתחלה, הסבר קצר בעברית פשוטה, ציין מקור ברור וסיים בברכה.
-            השאלה: {user_question}"""
-            
-            with st.spinner("הרב מעיין במקורות ומנסח תשובה..."):
-                response = model.generate_content(system_prompt, safety_settings=disable_safety)
+        api_key = st.secrets["GEMINI_API_KEY"]
+        
+        # חיבור ישיר לשרת ה-API של גוגל ללא תלות בספריות חיצוניות בעייתיות
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        
+        system_prompt = (
+            'אתה "הרב הדיגיטלי" במערכת "ג\'מי תורה". השב על השאלה הבאה בצורה הברורה, הפשוטה והישירה ביותר.\n'
+            'חוקים: פתח בברכת שלום קצרה, תן את התשובה והשורה התחתונה מיד בהתחלה, הסבר קצר בעברית פשוטה, '
+            'ציין מקור ברור וסיים בברכה.\n'
+            f'השאלה: {user_question}'
+        )
+        
+        payload = {
+            "contents": [{"parts": [{"text": system_prompt}]}],
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
+        }
+        
+        with st.spinner("הרב מעיין במקורות ומנסח תשובה..."):
+            try:
+                response = requests.post(url, headers=headers, json=payload)
                 
-                with st.chat_message("user"):
-                    st.write(f"**השאלה שלי:** {user_question}")
-                
-                # בדיקה לתמונת הרב
-                if os.path.exists("rabbi.jpeg"):
-                    rabbi_avatar = "rabbi.jpeg"
+                if response.status_code == 200:
+                    res_data = response.json()
+                    try:
+                        answer = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                        
+                        # הצגת שאלת המשתמש
+                        with st.chat_message("user"):
+                            st.write(f"**השאלה שלי:** {user_question}")
+                        
+                        # בדיקה חכמה לקובץ התמונה (תומך בכל הפורמטים ששמרת)
+                        rabbi_avatar = "📜"
+                        if os.path.exists("rabbi.jpeg"):
+                            rabbi_avatar = "rabbi.jpeg"
+                        elif os.path.exists("rabbi.png"):
+                            rabbi_avatar = "rabbi.png"
+                        
+                        # הצגת תשובת הרב
+                        with st.chat_message("assistant", avatar=rabbi_avatar):
+                            st.write(answer)
+                            
+                    except Exception:
+                        st.error("התקבלה תשובה אך מבנה הנתונים השתנה:")
+                        st.json(res_data)
                 else:
-                    rabbi_avatar = "📜" 
-                
-                with st.chat_message("assistant", avatar=rabbi_avatar):
-                    st.write(response.text)
+                    try:
+                        res_data = response.json()
+                        error_msg = res_data.get("error", {}).get("message", "שגיאה לא ידועה")
+                    except:
+                        error_msg = response.text
+                        
+                    st.error(f"❌ שגיאה משרת גוגל (קוד {response.status_code}): {error_msg}")
+                    st.info("💡 שים לב: אם רשום שהמודל לא נמצא (Not Found), הבעיה היא אך ורק במפתח ה-API שלך. מומלץ להיכנס ל-Google AI Studio, לייצר API Key חדש לחלוטין ולעדכן אותו ב-Secrets של Streamlit.")
                     
-        except Exception as e:
-            st.error(f"חלה שגיאה בתקשורת עם השרת: {e}")
+            except Exception as e:
+                st.error(f"חלה שגיאה בתקשורת עם השרת: {e}")
