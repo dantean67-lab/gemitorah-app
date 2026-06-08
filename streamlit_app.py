@@ -9,86 +9,87 @@ st.set_page_config(
     layout="centered"
 )
 
-# 2. שדרגנו את חבילת העיצוב (CSS) לרמה הגבוהה ביותר
+# 2. עיצוב ה-CSS החדש - נקי, ממורכז ומתאים לרקע
 st.markdown("""
     <style>
-    /* הגדרת כיוון האתר מימין לשמאל וגופן נקי */
+    /* הגדרות כיוון וגופן לכל האתר */
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
         direction: rtl !important;
         text-align: right !important;
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
     
-    /* כותרת האפליקציה - אפקט זכוכית מעוצב עם גרדיאנט מלכותי */
+    /* כותרת ראשית - באנר ירוק תורני עמוק עם מסגרת זהב */
     .main-title {
-        background: linear-gradient(135deg, #163019, #234920);
-        color: #f5edd6 !important;
-        padding: 30px;
-        border-radius: 20px;
+        background: linear-gradient(135deg, #112814, #1c3f1f);
+        color: #f4ecd8 !important;
+        padding: 35px 20px;
+        border-radius: 16px;
         text-align: center !important;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-        margin-bottom: 25px;
-        border: 2px solid #d4af37; /* מסגרת זהב עדינה */
+        box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        margin-bottom: 30px;
+        border: 1.5px solid #d4af37;
     }
     .main-title h1 {
         text-align: center !important;
-        color: #f5edd6 !important;
-        font-size: 2.5rem !important;
+        color: #f4ecd8 !important;
+        font-size: 2.4rem !important;
         font-weight: 700;
-        margin-bottom: 5px;
+        margin: 0 0 8px 0 !important;
     }
     .main-title h3 {
         text-align: center !important;
         color: #d4af37 !important;
-        font-size: 1.2rem !important;
+        font-size: 1.15rem !important;
         font-weight: 400;
+        margin: 0 !important;
     }
     
-    /* עיצוב שדה הזנת השאלה */
+    /* עיצוב תיבת קלט השאלה */
     .stTextInput > div > div > input {
         direction: rtl !important;
         text-align: right !important;
-        border: 2px solid #2d5a27 !important;
-        border-radius: 15px !important;
-        padding: 14px 20px !important;
-        font-size: 17px !important;
-        background-color: #fdfbf7 !important;
-        color: #222222 !important;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border: 2px solid #1c3f1f !important;
+        border-radius: 12px !important;
+        padding: 12px 15px !important;
+        font-size: 16px !important;
+        background-color: #1e1e1e !important;
+        color: #ffffff !important;
+        transition: border-color 0.3s ease;
     }
     .stTextInput > div > div > input:focus {
-        border-color: #d4af37 !important; /* הופך לזהב כשלוחצים עליו */
-        box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+        border-color: #d4af37 !important;
+        box-shadow: 0 0 10px rgba(212, 175, 55, 0.2);
     }
     
-    /* עיצוב כרטיס התשובה - נראה כמו דף מספר מעוצב */
-    .response-card {
-        background-color: #fdfbf7;
-        border-right: 6px solid #2d5a27;
-        border-left: 1px solid #e0dcd3;
-        border-top: 1px solid #e0dcd3;
-        border-bottom: 1px solid #e0dcd3;
-        padding: 25px;
-        border-radius: 4px 16px 16px 4px;
-        box-shadow: 0 6px 18px rgba(0,0,0,0.06);
-        margin-top: 20px;
-        line-height: 1.7;
-        color: #2b2b2b;
+    /* כרטיס תשובה חדש - משתלב בצורה חלקה ברקע, בלי שבירת שוליים */
+    .torah-response {
+        background-color: #181a1b;
+        border-right: 4px solid #d4af37;
+        padding: 20px;
+        border-radius: 4px 12px 12px 4px;
+        margin-top: 15px;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
     }
     
-    /* עיצוב הטקסט הקטן של האזהרה */
+    /* עיצוב כותרות בתוך התשובה (א, ב, ג) */
+    .torah-response h1, .torah-response h2, .torah-response h3 {
+        color: #d4af37 !important;
+        margin-top: 15px !important;
+        margin-bottom: 8px !important;
+    }
+    
+    /* טקסט אזהרה קטן בתחתית השדה */
     .disclaimer-text {
         text-align: center !important;
-        color: #777777;
+        color: #8a8a8a;
         font-size: 13px;
-        margin-top: 12px;
-        font-style: italic;
+        margin-top: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. באנר כותרת
+# 3. הצגת הבאנר העליון
 st.markdown("""
     <div class="main-title">
         <h1>📜 ג'מי תורה</h1>
@@ -96,19 +97,18 @@ st.markdown("""
     </div>
     """, unsafe_allow_html=True)
 
-# 4. תיבת השאלה והאזהרה
+# 4. שדה השאלה והערת האזהרה
 user_question = st.text_input("🔮 שאל את ג'מי תורה כל שאלה בתורה, בהלכה ובגמרא:")
 st.markdown('<div class="disclaimer-text">⚠️ ג\'מי תורה עלול לטעות, לכן תמיד מומלץ לבדוק אותו או לשאול רב בעניינים חשובים ולהלכה למעשה.</div>', unsafe_allow_html=True)
 
 st.write("---")
 
-# 5. הפעלת מנוע הבינה המלאכותית
+# 5. ריצה מול ה-AI ושליפת התשובה
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
-        st.error("⚠️ שגיאה: המפתח לא נקרא בהצלחה מה-Secrets. ודא שלחצת Save changes באתר של Streamlit.")
+        st.error("⚠️ שגיאה: המפתח לא נקרא בהצלחה מה-Secrets.")
     else:
         try:
-            # חיבור אוטומטי למפתח הסודי מה-Secrets
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
             model = genai.GenerativeModel('gemini-3-flash-preview')
             
@@ -126,8 +126,9 @@ if user_question:
             חוקים נוקשים:
             1. ענה תמיד בעברית ברורה, מכובדת ומדויקת.
             2. חלק את התשובה לסעיפים או נקודות כדי שתהיה קריאה וברורה.
-            3. ציין מקורות מדויקים ככל הניתן (מסכת, דף, סימן, סעיף).
-            4. אל תחרטט ואל תמציא שום דבר מהראש.
+            3. השתמש בכותרות ברורות עבור סעיפים (למשל: א. כותרת, ב. כותרת).
+            4. ציין מקורות מדויקים ככל הניתן (מסכת, דף, סימן, סעיף).
+            5. אל תחרטט ואל תמציא שום דבר מהראש.
             
             השאלה של הלומד: {user_question}"""
             
@@ -135,11 +136,12 @@ if user_question:
                 response = model.generate_content(system_prompt, safety_settings=disable_safety)
                 st.balloons()
                 
-                # כותרת מעוצבת לתשובה
                 st.markdown("### ✍️ תשובת ג'מי תורה המפורטת:")
                 
-                # הדפסת התשובה בתוך "כרטיס הספר" המעוצב שלנו
-                st.markdown(f'<div class="response-card">{response.text}</div>', unsafe_allow_html=True)
+                # יצירת המכולה המעוצבת החדשה שמתאימה בול לרקע הכהה
+                st.markdown(f'<div class="torah-response">', unsafe_allow_html=True)
+                st.write(response.text)
+                st.markdown('</div>', unsafe_allow_html=True)
                 
         except Exception as e:
             st.error(f"חלה שגיאה בתקשורת עם מנוע ה-AI: {e}")
