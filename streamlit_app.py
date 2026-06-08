@@ -4,7 +4,7 @@ import streamlit as st
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# 1. הגדרות דף - רוחב מלא (Wide) כפי שרצית
+# 1. הגדרות דף - רוחב מלא (Wide)
 st.set_page_config(
     page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית", 
     page_icon="📜", 
@@ -40,7 +40,7 @@ st.markdown("""
     .premium-header {
         background: linear-gradient(135deg, #0b151f, #142436);
         border-bottom: 3px solid #c5a059;
-        padding: 35px 40px;
+        padding: 40px;
         border-radius: 16px;
         box-shadow: 0 10px 30px rgba(0,0,0,0.3);
         margin-bottom: 35px;
@@ -65,13 +65,13 @@ st.markdown("""
         margin: 0 !important;
     }
     
-    /* עיצוב תמונת הרב בתוך הבאנר - גדולה ומכובדת אך לא חוסמת */
+    /* עיצוב תמונת הרב החדש - מוגדל (240px), מרשים, ולא תופס את כל המסך */
     .rabbi-banner-img {
-        width: 160px;
+        width: 240px;
         height: auto;
-        border-radius: 12px;
-        border: 2px solid #c5a059;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        border-radius: 14px;
+        border: 3px solid #c5a059;
+        box-shadow: 0 6px 25px rgba(0,0,0,0.5);
     }
     
     /* עיצוב שדה הקלט */
@@ -135,15 +135,15 @@ st.markdown('<div class="disclaimer-text">⚠️ לתשומת לבך: ג\'מי �
 
 st.write("---")
 
-# 5. הפעלת המודל הרשמי עם הגדרות בטוחות
+# 5. הפעלת המודל המעודכן (gemini-2.0-flash)
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ שגיאה: מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
     else:
         try:
-            # הגדרת המפתח והמודל הרשמי של גוגל
+            # הגדרת המפתח והמודל העדכני של גוגל
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.0-flash')
             
             disable_safety = {
                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -179,4 +179,3 @@ if user_question:
                 
         except Exception as e:
             st.error(f"חלה שגיאה בתקשורת עם מנוע ה-AI: {e}")
-            st.info("💡 במידה והשגיאה היא 404 (Model not found), המשמעות היא אחת: מפתח ה-API שנמצא ב-Secrets של Streamlit הוא מפתח ישן או לא פעיל. יש לייצר מפתח חדש לחלוטין ב-Google AI Studio ולעדכן אותו בלוח הבקרה ב-Streamlit Secrets.")
