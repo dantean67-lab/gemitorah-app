@@ -2,111 +2,119 @@ import streamlit as st
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# 1. הגדרות דף קבועות
+# 1. הגדרות דף - העברה לרוחב מלא (Wide)
 st.set_page_config(
     page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית", 
     page_icon="📜", 
-    layout="centered"
+    layout="wide"  # כאן פתחנו את כל המסך מצד לצד!
 )
 
-# 2. עיצוב ה-CSS החדש - נקי, ממורכז ומתאים לרקע
+# 2. ארכיטקטורת עיצוב פרימיום רחבה (CSS)
 st.markdown("""
     <style>
-    /* הגדרות כיוון וגופן לכל האתר */
+    /* הגדרת כיוון גלובלי ויישור לימין */
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
         direction: rtl !important;
         text-align: right !important;
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
     
-    /* כותרת ראשית - באנר ירוק תורני עמוק עם מסגרת זהב */
-    .main-title {
-        background: linear-gradient(135deg, #112814, #1c3f1f);
-        color: #f4ecd8 !important;
-        padding: 35px 20px;
+    /* מכולה ראשית שדואגת לשוליים אנושיים בצדדים ולא דוחסת הכל לאמצע */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+        padding-left: 5rem !important;
+        padding-right: 5rem !important;
+    }
+    
+    /* כותרת עליונה רחבה ומלכותית - כחול נייבי עמוק משולב בזהב */
+    .premium-header {
+        background: linear-gradient(135deg, #0f1d2a, #1a2e40);
+        border-bottom: 3px solid #c5a059; /* פס זהב עתיק בתחתית */
+        padding: 40px;
         border-radius: 16px;
-        text-align: center !important;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.3);
-        margin-bottom: 30px;
-        border: 1.5px solid #d4af37;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+        margin-bottom: 35px;
+        width: 100%;
     }
-    .main-title h1 {
-        text-align: center !important;
-        color: #f4ecd8 !important;
-        font-size: 2.4rem !important;
-        font-weight: 700;
-        margin: 0 0 8px 0 !important;
+    .premium-header h1 {
+        color: #f4edd8 !important;
+        font-size: 3rem !important;
+        font-weight: 800;
+        margin: 0 0 10px 0 !important;
     }
-    .main-title h3 {
-        text-align: center !important;
-        color: #d4af37 !important;
-        font-size: 1.15rem !important;
-        font-weight: 400;
+    .premium-header p {
+        color: #c5a059 !important;
+        font-size: 1.3rem !important;
         margin: 0 !important;
     }
     
-    /* עיצוב תיבת קלט השאלה */
+    /* עיצוב שדה הקלט - רחב ומודרני */
     .stTextInput > div > div > input {
         direction: rtl !important;
         text-align: right !important;
-        border: 2px solid #1c3f1f !important;
+        border: 2px solid #2c3e50 !important;
         border-radius: 12px !important;
-        padding: 12px 15px !important;
-        font-size: 16px !important;
-        background-color: #1e1e1e !important;
+        padding: 16px 20px !important;
+        font-size: 18px !important;
+        background-color: #141617 !important;
         color: #ffffff !important;
-        transition: border-color 0.3s ease;
+        transition: all 0.3s ease;
     }
     .stTextInput > div > div > input:focus {
-        border-color: #d4af37 !important;
-        box-shadow: 0 0 10px rgba(212, 175, 55, 0.2);
+        border-color: #c5a059 !important;
+        box-shadow: 0 0 15px rgba(197, 160, 89, 0.2);
     }
     
-    /* כרטיס תשובה חדש - משתלב בצורה חלקה ברקע, בלי שבירת שוליים */
-    .torah-response {
-        background-color: #181a1b;
-        border-right: 4px solid #d4af37;
-        padding: 20px;
-        border-radius: 4px 12px 12px 4px;
-        margin-top: 15px;
-        box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+    /* תצוגת התשובה התורנית - רחבה, נקייה וברורה בלי רקעים מציקים שנחתכים */
+    .torah-content-box {
+        background-color: #141617;
+        border-right: 5px solid #c5a059;
+        padding: 30px;
+        border-radius: 4px 16px 16px 4px;
+        margin-top: 25px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        font-size: 17.5px !important;
+        line-height: 1.8 !important;
+        color: #e0e0e0 !important;
     }
     
-    /* עיצוב כותרות בתוך התשובה (א, ב, ג) */
-    .torah-response h1, .torah-response h2, .torah-response h3 {
-        color: #d4af37 !important;
-        margin-top: 15px !important;
-        margin-bottom: 8px !important;
+    /* צבע זהב ייעודי לכותרות של הסעיפים שהבוט מייצר */
+    .torah-content-box h1, .torah-content-box h2, .torah-content-box h3 {
+        color: #c5a059 !important;
+        font-weight: 600 !important;
+        margin-top: 25px !important;
+        margin-bottom: 12px !important;
     }
     
-    /* טקסט אזהרה קטן בתחתית השדה */
+    /* אזהרה קטנה בתחתית השדה */
     .disclaimer-text {
-        text-align: center !important;
         color: #8a8a8a;
-        font-size: 13px;
-        margin-top: 10px;
+        font-size: 13.5px;
+        margin-top: 12px;
+        font-style: italic;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. הצגת הבאנר העליון
+# 3. הבאנר העליון המשודרג
 st.markdown("""
-    <div class="main-title">
+    <div class="premium-header">
         <h1>📜 ג'מי תורה</h1>
-        <h3>בינה מלאכותית בשירות עולם התורה וההלכה</h3>
+        <p>מערכת בינה מלאכותית מתקדמת לעיון, פסיקה ולימוד תורני</p>
     </div>
     """, unsafe_allow_html=True)
 
-# 4. שדה השאלה והערת האזהרה
-user_question = st.text_input("🔮 שאל את ג'מי תורה כל שאלה בתורה, בהלכה ובגמרא:")
-st.markdown('<div class="disclaimer-text">⚠️ ג\'מי תורה עלול לטעות, לכן תמיד מומלץ לבדוק אותו או לשאול רב בעניינים חשובים ולהלכה למעשה.</div>', unsafe_allow_html=True)
+# 4. מרחב העבודה הראשי
+user_question = st.text_input("🔮 שאל שאלה מפורטת בתנ\"ך, בגמרא, בהלכה או בקיצור שולחן ערוך:")
+st.markdown('<div class="disclaimer-text">⚠️ לתשומת לבך: ג\'מי תורה הוא כלי עזר ללימוד ועלול לטעות. לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.</div>', unsafe_allow_html=True)
 
 st.write("---")
 
-# 5. ריצה מול ה-AI ושליפת התשובה
+# 5. ריצת המודל והצגת התוצאה
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
-        st.error("⚠️ שגיאה: המפתח לא נקרא בהצלחה מה-Secrets.")
+        st.error("⚠️ שגיאה: מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
     else:
         try:
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -119,27 +127,26 @@ if user_question:
                 HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
             }
             
-            system_prompt = f"""אתה פוסק הלכה ועוזר תורני גאון ובקיא עצום בשם ג'מי תורה.
-            תפקידך לענות על שאלות בצורה המפורטת והעשירה ביותר (לא בקצרה!).
-            יש לך ידע מוחלט בכל התנ"ך, המשנה, הגמרא (בבלי וירושלמי), השולחן ערוך, וקיצור שולחן ערוך.
+            # שדרוג ה-Prompt כדי לקבל תשובות עשירות, עמוקות ומאורגנות בהרבה
+            system_prompt = f"""אתה ג'מי תורה - מנוע בינה מלאכותית תורני, פוסק הלכה ועוזר לימוד גאון ובקיא עצום.
+            תפקידך להעניק תשובות מקיפות, מלומדות, עמוקות ומפורטות ביותר. אל תענה בקצרה בשום אופן.
             
-            חוקים נוקשים:
-            1. ענה תמיד בעברית ברורה, מכובדת ומדויקת.
-            2. חלק את התשובה לסעיפים או נקודות כדי שתהיה קריאה וברורה.
-            3. השתמש בכותרות ברורות עבור סעיפים (למשל: א. כותרת, ב. כותרת).
-            4. ציין מקורות מדויקים ככל הניתן (מסכת, דף, סימן, סעיף).
-            5. אל תחרטט ואל תמציא שום דבר מהראש.
+            מבנה התשובה הנדרש:
+            1. פתיחה מכובדת המציגה בקצרה את מהות הנושא.
+            2. חלוקה לסעיפים ברורים עם כותרות בולטות (א., ב., ג. וכו').
+            3. הבאת מקורות מדויקים מהתנ"ך, משנה, גמרא, ראשונים, שולחן ערוך ואחרונים (כולל מסכת, דף, סימן וסעיף במידת האפשר).
+            4. סיכום קצר או מסקנה עולה בסוף הדברים.
             
             השאלה של הלומד: {user_question}"""
             
-            with st.spinner("ג'מי תורה מעיין במקורות..."):
+            with st.spinner("ג'מי תורה מעיין במקורות ויוצר תשובה מפורטת..."):
                 response = model.generate_content(system_prompt, safety_settings=disable_safety)
                 st.balloons()
                 
-                st.markdown("### ✍️ תשובת ג'מי תורה המפורטת:")
+                st.markdown("### ✍️ תשובת המערכת המורחבת:")
                 
-                # יצירת המכולה המעוצבת החדשה שמתאימה בול לרקע הכהה
-                st.markdown(f'<div class="torah-response">', unsafe_allow_html=True)
+                # הצגת התשובה ברוחב מלא בתוך התיבה המלכותית החדשה
+                st.markdown('<div class="torah-content-box">', unsafe_allow_html=True)
                 st.write(response.text)
                 st.markdown('</div>', unsafe_allow_html=True)
                 
