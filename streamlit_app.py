@@ -2,109 +2,137 @@ import os
 import streamlit as st
 import requests
 
-# 1. הגדרות דף
+# 1. הגדרות דף - רוחב מלא (Wide) כפי שהיה בקוד המקורי והטוב
 st.set_page_config(
-    page_title="ג'מי תורה", 
+    page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית", 
     page_icon="📜", 
-    layout="centered"
+    layout="wide"
 )
 
-# 2. עיצוב CSS יוקרתי ונקי (ללא מסגרות מיותרות)
+# 2. עיצוב ה-CSS היוקרתי והרחב המקורי
 st.markdown("""
     <style>
-    * {
-        direction: rtl;
+    /* הגדרת כיוון גלובלי ויישור לימין */
+    body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
+        direction: rtl !important;
+        text-align: right !important;
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
+    
+    /* שוליים רחבים בצדדים למראה נקי */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+        padding-left: 6rem !important;
+        padding-right: 6rem !important;
+    }
+    
+    /* כותרת עליונה רחבה ומלכותית - שילוב של כחול נייבי עמוק וזהב עתיק */
     .premium-header {
-        text-align: center;
-        padding: 2.5rem 1.5rem;
-        background: linear-gradient(180deg, #111b24 0%, #0e1117 100%);
-        border: 1px solid #233342;
+        background: linear-gradient(135deg, #0b151f, #142436);
         border-bottom: 3px solid #c5a059;
-        border-radius: 12px;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        padding: 40px;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        margin-bottom: 35px;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+    }
+    .header-text-container {
+        flex-grow: 1;
     }
     .premium-header h1 {
-        color: #ffffff !important;
+        color: #f4ecd8 !important;
         font-size: 3rem !important;
         font-weight: 800;
-        margin: 0 !important;
+        margin: 0 0 10px 0 !important;
     }
     .premium-header p {
         color: #c5a059 !important;
         font-size: 1.25rem !important;
-        margin-top: 8px !important;
-        opacity: 0.9;
+        margin: 0 !important;
     }
-    div[data-baseweb="base-input"] {
-        border: none !important;
-        background: transparent !important;
-        box-shadow: none !important;
+    
+    /* עיצוב שדה הקלט */
+    .stTextInput > div > div > input {
+        direction: rtl !important;
+        text-align: right !important;
+        border: 2px solid #223446 !important;
+        border-radius: 12px !important;
+        padding: 16px 20px !important;
+        font-size: 18px !important;
+        background-color: #111314 !important;
+        color: #ffffff !important;
+        transition: all 0.3s ease;
     }
-    div[data-baseweb="input"] {
-        border: 1px solid #2c3e50 !important;
-        background-color: #141617 !important;
-        border-radius: 30px !important;
-        padding-right: 15px;
-        box-shadow: none !important;
-    }
-    div[data-baseweb="input"]:focus-within {
+    .stTextInput > div > div > input:focus {
         border-color: #c5a059 !important;
-        box-shadow: 0 0 10px rgba(197, 160, 89, 0.25) !important;
+        box-shadow: 0 0 15px rgba(197, 160, 89, 0.2);
     }
+    
+    /* אזהרה קטנה בתחתית השדה */
     .disclaimer-text {
-        text-align: center;
-        color: #888888;
-        font-size: 0.88rem;
+        color: #8a8a8a;
+        font-size: 13.5px;
         margin-top: 12px;
-        font-weight: 400;
+        font-style: italic;
     }
-    .stChatMessage {
-        background-color: #181b1c !important;
-        border: 1px solid #25292b !important;
-        border-radius: 15px !important;
-        padding: 1rem !important;
-        margin-top: 15px !important;
+    
+    /* עיצוב כותרות בתוך התשובה שהבוט מייצר */
+    h1, h2, h3 {
+        color: #c5a059 !important;
+        font-weight: 600 !important;
     }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-# 3. הצגת הכותרת
+# 3. בדיקה חכמה ושילוב תמונת הרב בתוך הבאנר המלכותי
+rabbi_image_html = ""
+if os.path.exists("rabbi.jpeg"):
+    st.image("rabbi.jpeg", width=120)  # הצגת תמונת הרב מעל הכותרת בצורה נקייה בתוך הסטייל
+elif os.path.exists("rabbi.png"):
+    st.image("rabbi.png", width=120)
+
 st.markdown("""
     <div class="premium-header">
-        <h1>📜 ג'מי תורה</h1>
-        <p>עוזר תורני דיגיטלי הלכתי וגמרא חכם</p>
+        <div class="header-text-container">
+            <h1>📜 ג'מי תורה</h1>
+            <p>מערכת בינה מלאכותית מתקדמת לעיון, פסיקה ולימוד תורני</p>
+        </div>
     </div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-# 4. שדה הקלט
-user_question = st.text_input("💬 שאל את ג'מי תורה כל שאלה בתורה, בהלכה ובגמרא:")
-st.markdown(
-    '<div class="disclaimer-text">⚠️ לתשומת ליבך, הרב הדיגיטלי יכול לטעות '
-    'ובמקרים של ספק או הלכות למעשה תמיד מומלץ לשאול רב.</div>', 
-    unsafe_allow_html=True
-)
+# 4. מרחב העבודה הראשי
+user_question = st.text_input("🔮 שאל שאלה מפורטת בתנ\"ך, בגמרא, בהלכה או בקיצור שולחן ערוך:")
+st.markdown('<div class="disclaimer-text">⚠️ לתשומת לבך: ג\'מי תורה הוא כלי עזר ללימוד ועלול לטעות. לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.</div>', unsafe_allow_html=True)
+
 st.write("---")
 
-# 5. מנגנון הצ'אט וה-AI בפנייה ישירה
+# 5. ריצת המודל בצורה בטוחה וישירה (בלי ספריות שבורות)
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
-        st.error("⚠️ מפתח ה-API חסר בהגדרות ה-Secrets של Streamlit.")
+        st.error("⚠️ שגיאה: מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
     else:
         api_key = st.secrets["GEMINI_API_KEY"]
         
-        # חיבור ישיר לשרת ה-API של גוגל ללא תלות בספריות חיצוניות בעייתיות
+        # פנייה ישירה ומאובטחת למודל העדכני ביותר
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
         
-        system_prompt = (
-            'אתה "הרב הדיגיטלי" במערכת "ג\'מי תורה". השב על השאלה הבאה בצורה הברורה, הפשוטה והישירה ביותר.\n'
-            'חוקים: פתח בברכת שלום קצרה, תן את התשובה והשורה התחתונה מיד בהתחלה, הסבר קצר בעברית פשוטה, '
-            'ציין מקור ברור וסיים בברכה.\n'
-            f'השאלה: {user_question}'
-        )
+        # הפרומפט המקורי, המפורט והאיכותי ביותר שלך שיוצר תשובות עמוקות
+        system_prompt = f"""אתה ג'מי תורה - מנוע בינה מלאכותית תורני, פוסק הלכה ועוזר לימוד גאון ובקיא עצום.
+        תפקידך להעניק תשובות מקיפות, מלומדות, עמוקות ומפורטות ביותר. אל תענה בקצרה בשום אופן.
+        
+        מבנה התשובה הנדרש:
+        1. פתיחה מכובדת המציגה בקצרה את מהות הנושא.
+        2. חלוקה לסעיפים ברורים עם כותרות בולטות (א., ב., ג. וכו').
+        3. הבאת מקורות מדויקים מהתנ"ך, משנה, גמרא, ראשונים, שולחן ערוך ואחרונים (כולל מסכת, דף, סימן וסעיף במידת האפשר).
+        4. סיכום קצר או מסקנה עולה בסוף הדברים.
+        
+        השאלה של הלומד: {user_question}"""
         
         payload = {
             "contents": [{"parts": [{"text": system_prompt}]}],
@@ -116,42 +144,27 @@ if user_question:
             ]
         }
         
-        with st.spinner("הרב מעיין במקורות ומנסח תשובה..."):
+        with st.spinner("ג'מי תורה מעיין במקורות ויוצר תשובה מפורטת..."):
             try:
                 response = requests.post(url, headers=headers, json=payload)
                 
                 if response.status_code == 200:
                     res_data = response.json()
-                    try:
-                        answer = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                        
-                        # הצגת שאלת המשתמש
-                        with st.chat_message("user"):
-                            st.write(f"**השאלה שלי:** {user_question}")
-                        
-                        # בדיקה חכמה לקובץ התמונה (תומך בכל הפורמטים ששמרת)
-                        rabbi_avatar = "📜"
-                        if os.path.exists("rabbi.jpeg"):
-                            rabbi_avatar = "rabbi.jpeg"
-                        elif os.path.exists("rabbi.png"):
-                            rabbi_avatar = "rabbi.png"
-                        
-                        # הצגת תשובת הרב
-                        with st.chat_message("assistant", avatar=rabbi_avatar):
-                            st.write(answer)
-                            
-                    except Exception:
-                        st.error("התקבלה תשובה אך מבנה הנתונים השתנה:")
-                        st.json(res_data)
-                else:
-                    try:
-                        res_data = response.json()
-                        error_msg = res_data.get("error", {}).get("message", "שגיאה לא ידועה")
-                    except:
-                        error_msg = response.text
-                        
-                    st.error(f"❌ שגיאה משרת גוגל (קוד {response.status_code}): {error_msg}")
-                    st.info("💡 שים לב: אם רשום שהמודל לא נמצא (Not Found), הבעיה היא אך ורק במפתח ה-API שלך. מומלץ להיכנס ל-Google AI Studio, לייצר API Key חדש לחלוטין ולעדכן אותו ב-Secrets של Streamlit.")
+                    answer = res_data["candidates"][0]["content"]["parts"][0]["text"]
                     
+                    st.balloons()
+                    st.markdown("### ✍️ תשובת המערכת המורחבת:")
+                    
+                    # קופסת התשובה המקורית והרחבה
+                    with st.container(border=True):
+                        st.markdown(
+                            f"<div style='font-size: 18px; line-height: 1.8; color: #e0e0e0;'>", 
+                            unsafe_allow_html=True
+                        )
+                        st.markdown(answer)
+                        st.markdown("</div>", unsafe_allow_html=True)
+                else:
+                    st.error(f"❌ שגיאה מהשרת (קוד {response.status_code})")
+                    st.info("💡 המערכת מוכנה! כל שנותר הוא לוודא שהעתקת את מפתח ה-API החדש שקיבלת מהמסך הקודם אל תוך ה-Secrets ב-Streamlit.")
             except Exception as e:
-                st.error(f"חלה שגיאה בתקשורת עם השרת: {e}")
+                st.error(f"חלה שגיאה בתקשורת עם מנוע ה-AI: {e}")
