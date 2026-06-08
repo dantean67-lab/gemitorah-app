@@ -2,121 +2,148 @@ import streamlit as st
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# 1. הגדרות דף קבועות לכל האתר
+# 1. הגדרות דף - השם הרשמי שלך
 st.set_page_config(
     page_title="ג'מי תורה", 
     page_icon="📜", 
     layout="wide"
 )
 
-# 2. חבילת עיצוב פרימיום (CSS) - תיקון הטבעת האדומה, יציבות הבועות ואנימציה חיה
+# 2. עיצוב חסין לחיתוכים והעלמת מסגרות אדומות
 st.markdown("""
     <style>
-    /* כיוון טקסט גלובלי לימין */
-    body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
+    /* הגדרות כיוון טקסט לימין */
+    body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown {
         direction: rtl !important;
         text-align: right !important;
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
     
-    /* מרכז את אזור העבודה בצורה נקייה */
     .block-container {
-        max-width: 900px !important;
+        max-width: 850px !important;
         padding-top: 2rem !important;
         padding-bottom: 2rem !important;
         margin: 0 auto !important;
     }
     
-    /* באנר כותרת עליון מעודכן */
+    /* באנר עליון ירוק כהה ויוקרתי (כמו בתמונות שלך) */
     .chat-header {
-        background: linear-gradient(135deg, #0f1d2a, #1a2e40);
-        border: 1px solid #2c3e50;
-        border-right: 5px solid #c5a059;
-        padding: 30px;
-        border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        background: linear-gradient(135deg, #1e3f20, #142a16);
+        border: 1px solid #2d5a30;
+        border-right: 6px solid #c5a059;
+        padding: 35px;
+        border-radius: 14px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.4);
         margin-bottom: 30px;
         text-align: center !important;
     }
     .chat-header h1 {
-        color: #f4edd8 !important;
-        font-size: 2.4rem !important;
+        color: #ffffff !important;
+        font-size: 2.6rem !important;
         font-weight: 700;
-        margin: 0 0 8px 0 !important;
+        margin: 0 0 10px 0 !important;
         text-align: center !important;
     }
     .chat-header p {
         color: #c5a059 !important;
-        font-size: 1.15rem !important;
+        font-size: 1.2rem !important;
         margin: 0 !important;
         text-align: center !important;
     }
     
-    /* תיקון והעלמת המסגרת האדומה בזמן לחיצה */
-    div[data-baseweb="input"] {
+    /* 🔴 מחיקה מוחלטת של המסגרת האדומה / כתומה בזמן פוקוס */
+    div[data-baseweb="base-input"], div[data-baseweb="input"] {
         border: 2px solid #2c3e50 !important;
-        border-radius: 25px !important;
+        border-radius: 20px !important;
         background-color: #141617 !important;
-        transition: all 0.3s ease !important;
+        box-shadow: none !important;
     }
-    div[data-baseweb="input"]:focus-within {
-        border-color: #c5a059 !important; /* הופך לזהב יוקרתי בלחיצה */
-        box-shadow: 0 0 12px rgba(197, 160, 89, 0.4) !important;
+    div[data-baseweb="base-input"]:focus-within, div[data-baseweb="input"]:focus-within {
+        border-color: #c5a059 !important;
+        box-shadow: 0 0 10px rgba(197, 160, 89, 0.3) !important;
     }
     .stTextInput input {
         color: #ffffff !important;
-        font-size: 16.5px !important;
-        padding: 12px 20px !important;
         background-color: transparent !important;
     }
     
-    /* אזהרה קבועה ויחידה בתחתית */
+    /* אזהרה קבועה ללא שינויים */
     .disclaimer-fixed {
         text-align: center !important;
-        color: #8a8a8a;
+        color: #a0a0a0;
         font-size: 14px;
-        margin-top: 12px;
+        margin-top: 15px;
+        font-weight: 500;
     }
     
-    /* אנימציית "נשימה" לאווטאר של הרב */
+    /* --- עיצוב הבועות המותאם אישית (בלי חיתוכים) --- */
+    .custom-chat-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 15px;
+        width: 100%;
+        margin-top: 25px;
+        margin-bottom: 25px;
+    }
+    
+    /* ✨ אנימציית נשימה עדינה לאווטאר של הרב */
     @keyframes avatarPulse {
         0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(197, 160, 89, 0.4); }
-        50% { transform: scale(1.04); box-shadow: 0 0 15px rgba(197, 160, 89, 0.7); }
+        50% { transform: scale(1.05); box-shadow: 0 0 15px rgba(197, 160, 89, 0.6); }
         100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(197, 160, 89, 0.4); }
     }
     
-    /* החלת האנימציה על תמונת הרב בצ'אט */
-    img[alt="chat avatar"] {
-        animation: avatarPulse 3s infinite ease-in-out !important;
-        border: 2px solid #c5a059 !important;
-        padding: 2px;
+    .custom-avatar {
+        width: 65px;
+        height: 65px;
+        border-radius: 50%;
+        border: 2px solid #c5a059;
+        background-color: #1a2e40;
+        flex-shrink: 0;
+        animation: avatarPulse 3s infinite ease-in-out;
+        object-fit: contain;
     }
     
-    /* התאמת צבעי טקסט בתוך בועות הצ'אט */
-    .stChatMessage {
-        background-color: #141617 !important;
-        border: 1px solid #2c3e50 !important;
-        border-radius: 12px !important;
-        margin-top: 15px !important;
+    .custom-bubble {
+        background-color: #181b1c;
+        border: 1px solid #2c3e50;
+        border-right: 4px solid #c5a059;
+        color: #e5e5e5 !important;
+        padding: 20px;
+        border-radius: 4px 18px 18px 18px;
+        flex-grow: 1;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        font-size: 16.5px;
+        line-height: 1.7;
+    }
+    
+    .user-bubble-box {
+        background-color: #263849;
+        color: #ffffff !important;
+        padding: 15px 20px;
+        border-radius: 18px 18px 4px 18px;
+        margin-right: auto;
+        max-width: 80%;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.2);
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. הבאנר העליון - עודכן חזרה ל"ג'מי תורה"
+# 3. באנר עליון רשמי
 st.markdown("""
     <div class="chat-header">
         <h1>📜 ג'מי תורה</h1>
-        <p>תשובות ברורות, ישירות והלכה למעשה בגובה העיניים</p>
+        <p>עוזר תורני דיגיטלי הלכתי וגמרא חכם</p>
     </div>
     """, unsafe_allow_html=True)
 
-# 4. שדה הזנת השאלה והאזהרה הקבועה
-user_question = st.text_input("💬 מה השאלה שלך?")
+# 4. קלט משתמש ואזהרה קבועה
+user_question = st.text_input("💬 שאל את ג'מי תורה כל שאלה בתורה, בהלכה, בקיצור שולחן ערוך ובגמרא:")
 st.markdown('<div class="disclaimer-fixed">לתשומת ליבך, הרב הדיגיטלי יכול לטעות ובמקרים של ספק או הלכות למעשה תמיד מומלץ לשאול רב.</div>', unsafe_allow_html=True)
 
 st.write("---")
 
-# 5. מנוע הפעלה ומענה חכם
+# 5. מענה ויצירת התשובה במודל המעודכן
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ שגיאה: מפתח ה-API חסר בהגדרות המערכת.")
@@ -124,20 +151,8 @@ if user_question:
         try:
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
             
-            # הגדרות המערכת הפנימיות למודל
-            rabbi_instructions = """אתה "הרב הדיגיטלי" הפועל בתוך מערכת "ג'מי תורה". תפקידך להשיב לשאלות הציבור בצורה הברורה, הפשוטה והישירה ביותר.
-            חוקי ברזל:
-            1. אתה רב אנושי, חם ומסביר פנים. אל תזכיר בשום אופן מילים כמו "בינה מלאכותית", "AI", "מודל" או "תוכנה".
-            2. פתח תמיד בברכת שלום קצרה ומכובדת (למשל: "שלום וברכה").
-            3. תן את השורה התחתונה (ההלכה למעשה או הברכה) מיד על ההתחלה, בצורה הכי ברורה וחדה שיש.
-            4. תן הסבר קצר ופשוט בשפה ברורה, ללא מילים קשות בארמית או פלפולים מסובכים.
-            5. ציין מקור בעברית פשוטה (למשל: "כך נפסק בשולחן ערוך").
-            6. חתום בברכה קצרה ומכובדת."""
-            
-            model = genai.GenerativeModel(
-                model_name='gemini-3-flash-preview',
-                system_instruction=rabbi_instructions
-            )
+            # הגדרת המודל הנכון והעדכני ביותר למניעת שגיאת 404
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             disable_safety = {
                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -146,20 +161,42 @@ if user_question:
                 HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
             }
             
+            system_prompt = f"""אתה "הרב הדיגיטלי" במערכת "ג'מי תורה". השב על השאלה הבאה בצורה הברורה, הפשוטה והישירה ביותר לכל אדם.
+            
+            חוקים:
+            1. פתח בברכת שלום קצרה ומכובדת ("שלום וברכה").
+            2. תן את השורה התחתונה והתשובה הישירה מיד בסעיף הראשון.
+            3. הסבר קצר ופשוט ללא מילים בארמית או סיבוכים.
+            4. ציין מקור בעברית בצורה פשוטה.
+            5. סיים בברכה קצרה.
+            
+            השאלה: {user_question}"""
+            
             with st.spinner("הרב מעיין במקורות ומנסח תשובה ברורה..."):
-                response = model.generate_content(user_question, safety_settings=disable_safety)
+                response = model.generate_content(system_prompt, safety_settings=disable_safety)
                 st.balloons()
                 
-                # השאלה של המשתמש
-                with st.chat_message("user"):
-                    st.write(f"**השאלה שלי:** {user_question}")
+                # הצגת שאלת המשתמש בבועה נקייה
+                st.markdown(f"""
+                    <div style="display: flex; justify-content: flex-end; width: 100%;">
+                        <div class="user-bubble-box">
+                            <strong>השאלה שלי:</strong> {user_question}
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
                 
-                # תמונת פרופיל של הרב שתקבל את אפקט התנועה מה-CSS
-                rabbi_avatar_url = "https://cdn-icons-png.flaticon.com/512/3404/3404571.png"
+                # אווטאר וקטורי מונפש של חכם תורני (לא נחתך ויציב)
+                rabbi_avatar = "https://img.icons8.com/color/120/rabbi.png"
                 
-                # תשובת הרב
-                with st.chat_message("assistant", avatar=rabbi_avatar_url):
-                    st.write(response.text)
-                    
+                # הצגת בועת הרב המעוצבת והמונפשת
+                st.markdown(f"""
+                    <div class="custom-chat-row">
+                        <img class="custom-avatar" src="{rabbi_avatar}" alt="רב">
+                        <div class="custom-bubble">
+                            {response.text.replace('\n', '<br>')}
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
         except Exception as e:
-            st.error(f"חלה שגיאה בתקשורת: {e}")
+            st.error(f"חלה שגיאה בתקשורת עם מנוע ה-AI: {e}")
