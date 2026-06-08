@@ -2,14 +2,14 @@ import streamlit as st
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# 1. הגדרות דף - העברה לרוחב מלא (Wide)
+# 1. הגדרות דף - רוחב מלא (Wide)
 st.set_page_config(
     page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית", 
     page_icon="📜", 
-    layout="wide"  # כאן פתחנו את כל המסך מצד לצד!
+    layout="wide"
 )
 
-# 2. ארכיטקטורת עיצוב פרימיום רחבה (CSS)
+# 2. עיצוב ה-CSS החדש - נקי, רחב ובלי קופסאות שבורות
 st.markdown("""
     <style>
     /* הגדרת כיוון גלובלי ויישור לימין */
@@ -19,45 +19,45 @@ st.markdown("""
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
     
-    /* מכולה ראשית שדואגת לשוליים אנושיים בצדדים ולא דוחסת הכל לאמצע */
+    /* שוליים אנושיים בצדדים כדי שלא יידבק לקצוות המסך */
     .block-container {
         padding-top: 2rem !important;
         padding-bottom: 2rem !important;
-        padding-left: 5rem !important;
-        padding-right: 5rem !important;
+        padding-left: 6rem !important;
+        padding-right: 6rem !important;
     }
     
-    /* כותרת עליונה רחבה ומלכותית - כחול נייבי עמוק משולב בזהב */
+    /* כותרת עליונה רחבה ומלכותית - שילוב של כחול נייבי עמוק וזהב עתיק */
     .premium-header {
-        background: linear-gradient(135deg, #0f1d2a, #1a2e40);
-        border-bottom: 3px solid #c5a059; /* פס זהב עתיק בתחתית */
+        background: linear-gradient(135deg, #0b151f, #142436);
+        border-bottom: 3px solid #c5a059;
         padding: 40px;
         border-radius: 16px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
         margin-bottom: 35px;
         width: 100%;
     }
     .premium-header h1 {
-        color: #f4edd8 !important;
+        color: #f4ecd8 !important;
         font-size: 3rem !important;
         font-weight: 800;
         margin: 0 0 10px 0 !important;
     }
     .premium-header p {
         color: #c5a059 !important;
-        font-size: 1.3rem !important;
+        font-size: 1.25rem !important;
         margin: 0 !important;
     }
     
-    /* עיצוב שדה הקלט - רחב ומודרני */
+    /* עיצוב שדה הקלט */
     .stTextInput > div > div > input {
         direction: rtl !important;
         text-align: right !important;
-        border: 2px solid #2c3e50 !important;
+        border: 2px solid #223446 !important;
         border-radius: 12px !important;
         padding: 16px 20px !important;
         font-size: 18px !important;
-        background-color: #141617 !important;
+        background-color: #111314 !important;
         color: #ffffff !important;
         transition: all 0.3s ease;
     }
@@ -66,33 +66,18 @@ st.markdown("""
         box-shadow: 0 0 15px rgba(197, 160, 89, 0.2);
     }
     
-    /* תצוגת התשובה התורנית - רחבה, נקייה וברורה בלי רקעים מציקים שנחתכים */
-    .torah-content-box {
-        background-color: #141617;
-        border-right: 5px solid #c5a059;
-        padding: 30px;
-        border-radius: 4px 16px 16px 4px;
-        margin-top: 25px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-        font-size: 17.5px !important;
-        line-height: 1.8 !important;
-        color: #e0e0e0 !important;
-    }
-    
-    /* צבע זהב ייעודי לכותרות של הסעיפים שהבוט מייצר */
-    .torah-content-box h1, .torah-content-box h2, .torah-content-box h3 {
-        color: #c5a059 !important;
-        font-weight: 600 !important;
-        margin-top: 25px !important;
-        margin-bottom: 12px !important;
-    }
-    
     /* אזהרה קטנה בתחתית השדה */
     .disclaimer-text {
         color: #8a8a8a;
         font-size: 13.5px;
         margin-top: 12px;
         font-style: italic;
+    }
+    
+    /* עיצוב כותרות בתוך התשובה שהבוט מייצר */
+    h1, h2, h3 {
+        color: #c5a059 !important;
+        font-weight: 600 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -127,7 +112,6 @@ if user_question:
                 HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
             }
             
-            # שדרוג ה-Prompt כדי לקבל תשובות עשירות, עמוקות ומאורגנות בהרבה
             system_prompt = f"""אתה ג'מי תורה - מנוע בינה מלאכותית תורני, פוסק הלכה ועוזר לימוד גאון ובקיא עצום.
             תפקידך להעניק תשובות מקיפות, מלומדות, עמוקות ומפורטות ביותר. אל תענה בקצרה בשום אופן.
             
@@ -145,10 +129,14 @@ if user_question:
                 
                 st.markdown("### ✍️ תשובת המערכת המורחבת:")
                 
-                # הצגת התשובה ברוחב מלא בתוך התיבה המלכותית החדשה
-                st.markdown('<div class="torah-content-box">', unsafe_allow_html=True)
-                st.write(response.text)
-                st.markdown('</div>', unsafe_allow_html=True)
+                # יצירת קופסת רקע חלקה ומובנית של Streamlit (בלי HTML שבור ובלי פסים שחורים)
+                with st.container(border=True):
+                    st.markdown(
+                        f"<div style='font-size: 18px; line-height: 1.8; color: #e0e0e0;'>", 
+                        unsafe_allow_html=True
+                    )
+                    st.write(response.text)
+                    st.markdown("</div>", unsafe_allow_html=True)
                 
         except Exception as e:
             st.error(f"חלה שגיאה בתקשורת עם מנוע ה-AI: {e}")
