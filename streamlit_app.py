@@ -4,31 +4,26 @@ import streamlit as st
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# 1. הגדרות דף - רוחב מלא (Wide)
 st.set_page_config(
     page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית", 
     page_icon="📜", 
     layout="wide"
 )
 
-# פונקציית עזר להטמעת תמונת הרב בצורה נקייה וגדולה בתוך הבאנר
 def get_base64_image(img_path):
     if os.path.exists(img_path):
         with open(img_path, "rb") as f:
             return base64.b64encode(f.read()).decode()
     return None
 
-# 2. עיצוב ה-CSS היוקרתי והרחב
 st.markdown("""
     <style>
-    /* הגדרת כיוון גלובלי ויישור לימין */
     body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAlert {
         direction: rtl !important;
         text-align: right !important;
         font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     }
     
-    /* שוליים רחבים ונקיים בצדדים */
     .block-container {
         padding-top: 2rem !important;
         padding-bottom: 2rem !important;
@@ -36,7 +31,6 @@ st.markdown("""
         padding-right: 6rem !important;
     }
     
-    /* באנר כותרת מלכותי ויוקרתי משולב Flexbox */
     .premium-header {
         background: linear-gradient(135deg, #0b151f, #142436);
         border-bottom: 3px solid #c5a059;
@@ -65,7 +59,6 @@ st.markdown("""
         margin: 0 !important;
     }
     
-    /* עיצוב תמונת הרב */
     .rabbi-banner-img {
         width: 240px;
         height: auto;
@@ -74,7 +67,6 @@ st.markdown("""
         box-shadow: 0 6px 25px rgba(0,0,0,0.5);
     }
     
-    /* עיצוב שדה הקלט */
     .stTextInput > div > div > input {
         direction: rtl !important;
         text-align: right !important;
@@ -105,7 +97,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. בניית הבאנר העליון עם תמונת הרב
 rabbi_base64 = get_base64_image("rabbi.jpeg") or get_base64_image("rabbi.png")
 
 if rabbi_base64:
@@ -129,23 +120,20 @@ else:
     """
 st.markdown(header_html, unsafe_allow_html=True)
 
-# 4. מרחב העבודה הראשי
 user_question = st.text_input("🔮 שאל שאלה מפורטת בתנ\"ך, בגמרא, בהלכה או בקיצור שולחן ערוך:")
 st.markdown('<div class="disclaimer-text">⚠️ לתשומת לבך: ג\'מי תורה הוא כלי עזר ללימוד ועלול לטעות. לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.</div>', unsafe_allow_html=True)
 
 st.write("---")
 
-# 5. הפעלת המודל - הגרסה היציבה (gemini-pro)
 if user_question:
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ שגיאה: מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
     else:
         try:
-            # הגדרת המפתח והמודל
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            model = genai.GenerativeModel('gemini-pro')
+            # שינוי קריטי: שימוש במודל יציב וקיים בוודאות
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
-            # הגדרות בטיחות פתוחות ללימוד תורני
             disable_safety = {
                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
                 HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -159,7 +147,7 @@ if user_question:
             מבנה התשובה הנדרש:
             1. פתיחה מכובדת המציגה בקצרה את מהות הנושא.
             2. חלוקה לסעיפים ברורים עם כותרות בולטות (א., ב., ג. וכו').
-            3. הבאת מקורות מדויקים מהתנ"ך, משנה, גמרא, ראשונים, שולחן ערוך ואחרונים (כולל מסכת, דף, סימן וסעיף במידת האפשר).
+            3. הבאת מקורות מדויקים מהתנ"ך, משנה, גמרא, ראשונים, שולחן ערוך ואחרונים.
             4. סיכום קצר או מסקנה עולה בסוף הדברים.
             
             השאלה של הלומד: {user_question}"""
@@ -182,8 +170,8 @@ if user_question:
             error_str = str(e).lower()
             
             if "429" in error_str or "quota" in error_str or "exhausted" in error_str:
-                st.error("⚠️ שגיאה מהשרת (קוד 429) - המכסה החינמית של גוגל הסתיימה להיום, יש לנסות שוב מחר או להחליף מפתח API.")
+                st.error("⚠️ שגיאה מהשרת (קוד 429) - המכסה החינמית של גוגל הסתיימה. נסה מפתח חדש.")
             elif "404" in error_str or "not found" in error_str:
-                st.error("⚠️ שגיאה מהשרת (קוד 404) - בעיה בזיהוי המודל או במפתח ה-API החינמי.")
+                st.error("⚠️ שגיאה מהשרת (קוד 404) - בעיה בזיהוי המודל. ודא שהמפתח תקין.")
             else:
                 st.error(f"חלה שגיאה בתקשורת עם מנוע ה-AI: {e}")
