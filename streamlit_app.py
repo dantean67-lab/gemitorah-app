@@ -131,7 +131,6 @@ if user_question:
     else:
         try:
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            # שינוי קריטי: שימוש במודל יציב וקיים בוודאות
             model = genai.GenerativeModel('gemini-1.5-flash')
             
             disable_safety = {
@@ -155,23 +154,10 @@ if user_question:
             with st.spinner("ג'מי תורה מעיין במקורות ויוצר תשובה מפורטת..."):
                 response = model.generate_content(system_prompt, safety_settings=disable_safety)
                 st.balloons()
-                
                 st.markdown("### ✍️ תשובת המערכת המורחבת:")
-                
                 with st.container(border=True):
-                    st.markdown(
-                        f"<div style='font-size: 18px; line-height: 1.8; color: #e0e0e0;'>", 
-                        unsafe_allow_html=True
-                    )
                     st.write(response.text)
-                    st.markdown("</div>", unsafe_allow_html=True)
                 
         except Exception as e:
-            error_str = str(e).lower()
-            
-            if "429" in error_str or "quota" in error_str or "exhausted" in error_str:
-                st.error("⚠️ שגיאה מהשרת (קוד 429) - המכסה החינמית של גוגל הסתיימה. נסה מפתח חדש.")
-            elif "404" in error_str or "not found" in error_str:
-                st.error("⚠️ שגיאה מהשרת (קוד 404) - בעיה בזיהוי המודל. ודא שהמפתח תקין.")
-            else:
-                st.error(f"חלה שגיאה בתקשורת עם מנוע ה-AI: {e}")
+            # הדפסת השגיאה הגולמית ישירות למסך לצורך דיאגנוסטיקה
+            st.error(f"❌ שגיאה טכנית מפורטת מהשרת של גוגל: {e}")
