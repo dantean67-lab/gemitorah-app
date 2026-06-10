@@ -42,9 +42,7 @@ body, p, div, h1, h2, h3, h4, h5, h6, li, span, input, label, .stMarkdown, .stAl
     align-items: center;
     gap: 30px;
 }
-.header-text-container {
-    flex: 1;
-}
+.header-text-container { flex: 1; }
 .premium-header h1 {
     color: #f4ecd8 !important;
     font-size: 3rem !important;
@@ -88,6 +86,9 @@ h1, h2, h3 {
     color: #c5a059 !important;
     font-weight: 600 !important;
 }
+#MainMenu {visibility: hidden !important;}
+footer {visibility: hidden !important;}
+[data-testid="manage-app-button"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -128,8 +129,8 @@ if user_question:
         try:
             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-            # *** התיקון: שונה מ gemini-1.5-flash ל gemini-2.0-flash ***
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            # שימוש ב-gemini-1.5-flash-latest — זמין בחינם ויציב
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
             disable_safety = {
                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
