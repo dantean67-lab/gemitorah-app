@@ -178,7 +178,7 @@ if "selected_question" not in st.session_state:
     st.session_state.selected_question = ""
 
 # ── שאלות לדוגמה ──────────────────────────────────────────────────
-st.markdown('<p class="example-label">💡 שאלות לדוגמה — לחץ כדי לשאול:</p>', unsafe_allow_html=True)
+st.markdown('<p class="example-label">💡 שאלות לדוגמה — לחץ כדי שאול:</p>', unsafe_allow_html=True)
 examples = [
     "מה הלכות שבת לגבי חשמל?",
     "מקור מצוות כיבוד אב ואם",
@@ -248,8 +248,9 @@ if user_question and user_question.strip():
             full_response = ""
 
             with st.spinner("...ג'מי תורה מעיין במקורות ויוצר תשובה מפורטת"):
+                # שינוי שם המודל לגרסה העדכנית ביותר של שנת 2026
                 for chunk in client.models.generate_content_stream(
-                    model="gemini-1.5-flash",
+                    model="gemini-2.5-flash",
                     contents=user_question.strip(),
                     config=config
                 ):
