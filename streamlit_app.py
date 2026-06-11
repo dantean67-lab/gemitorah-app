@@ -1,8 +1,8 @@
 import os
 import base64
 import streamlit as st
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google import genai
+from google.genai import types
 
 st.set_page_config(
     page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית",
@@ -85,6 +85,7 @@ textarea, .stMarkdown, .stAlert, .stTextInput label {
     color: #c5a059 !important;
     font-size: 13px !important;
     padding: 6px 14px !important;
+    width: 100% !important;
     transition: all 0.2s;
 }
 .stButton > button:hover {
@@ -117,13 +118,39 @@ h1, h2, h3 { color: #c5a059 !important; font-weight: 600 !important; }
 }
 #MainMenu { visibility: hidden !important; }
 footer { visibility: hidden !important; }
+header { visibility: hidden !important; }
 [data-testid="manage-app-button"] { display: none !important; }
+[data-testid="stToolbarActions"] { display: none !important; }
 [data-testid="stToolbar"] { display: none !important; }
 .stDeployButton { display: none !important; }
 </style>
+
+<script>
+(function() {
+    const hide = () => {
+        const selectors = [
+            '[data-testid="manage-app-button"]',
+            '[data-testid="stToolbarActions"]',
+            '[data-testid="stToolbar"]',
+            '.stDeployButton',
+            'footer'
+        ];
+        selectors.forEach(s => {
+            document.querySelectorAll(s).forEach(el => {
+                el.style.setProperty('display', 'none', 'important');
+            });
+        });
+    };
+    const obs = new MutationObserver(hide);
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+    hide();
+    setTimeout(hide, 1000);
+    setTimeout(hide, 3000);
+})();
+</script>
 """, unsafe_allow_html=True)
 
-# ── Header ──────────────────────────────────────────────────
+# ── Header ───────────────────────────────────────────────────────
 rabbi_base64 = get_base64_image("rabbi.jpeg") or get_base64_image("rabbi.png")
 if rabbi_base64:
     header_html = f"""
@@ -144,26 +171,27 @@ else:
 </div>"""
 st.markdown(header_html, unsafe_allow_html=True)
 
-# ── Session state ────────────────────────────────────────────
+# ── Session state ─────────────────────────────────────────────────
 if "history" not in st.session_state:
     st.session_state.history = []
 if "selected_question" not in st.session_state:
     st.session_state.selected_question = ""
 
-# ── דוגמאות שאלות ───────────────────────────────────────────
+# ── שאלות לדוגמה ──────────────────────────────────────────────────
 st.markdown('<p class="example-label">💡 שאלות לדוגמה — לחץ כדי לשאול:</p>', unsafe_allow_html=True)
 examples = [
-    "מה הלכות שבת לגבי שימוש בחשמל?",
-    "מה המקור למצוות כיבוד אב ואם?",
-    "מה דיני אבילות שבעה?",
-    "מהם הלכות כשרות בסיסיות?",
+    "מה הלכות שבת לגבי חשמל?",
+    "מקור מצוות כיבוד אב ואם",
+    "דיני אבילות שבעה",
+    "הלכות כשרות בסיסיות",
 ]
-cols = st.columns(len(examples))
+cols = st.columns(4)
 for i, (col, q) in enumerate(zip(cols, examples)):
-    if col.button(q, key=f"ex_{i}"):
+    if col.button(q, key=f"ex_{i}", use_container_width=True):
         st.session_state.selected_question = q
+        st.rerun()
 
-# ── תיבת שאלה ──────────────────────────────────────────────
+# ── תיבת שאלה ────────────────────────────────────────────────────
 user_question = st.text_input(
     "🔮 שאל שאלה בתנ\"ך, בגמרא, בהלכה או בקיצור שולחן ערוך:",
     value=st.session_state.selected_question,
@@ -175,59 +203,57 @@ st.markdown(
 )
 st.write("---")
 
-# ── עיבוד שאלה ─────────────────────────────────────────────
+# ── עיבוד שאלה ──────────────────────────────────────────────────
 if user_question and user_question.strip():
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ שגיאה: מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
     else:
         try:
-            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-            disable_safety = {
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH:       HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HARASSMENT:        HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            }
-
-            system_prompt = f"""אתה ג'מי תורה — מנוע בינה מלאכותית תורני ברמה של גדול הדור, פוסק הלכה ומלמד תורה מומחה.
+            system_instruction = """אתה ג'מי תורה — מנוע בינה מלאכותית תורני ברמה של גדול הדור, פוסק הלכה ומלמד תורה מומחה.
 
 בקיאותך המלאה:
 • תנ"ך — תורה, נביאים וכתובים, עם פירוש רש"י, אבן עזרא, רמב"ן ורד"ק
 • משנה — כל הסדרים, עם פירוש הרמב"ם ורבנו עובדיה מברטנורא
-• תלמוד בבלי וירושלמי — גמרא, רש"י, תוספות, ריטב"א, רשב"א, ר"ן, רמב"ן
-• ראשונים — רמב"ם (משנה תורה), טור, סמ"ג, ספר החינוך ועוד
-• שולחן ערוך — כל ד' חלקיו (אורח חיים, יורה דעה, אבן העזר, חושן משפט), עם מגן אברהם, ט"ז, ש"ך, באר היטב
+• תלמוד בבלי וירושלמי — גמרא, רש"י, תוספות, ריטב"א, רשב"א, ר"ן
+• ראשונים — רמב"ם (משנה תורה), טור, ספר החינוך, סמ"ג
+• שולחן ערוך — כל ד' חלקיו עם מגן אברהם, ט"ז, ש"ך, באר היטב
 • אחרונים — משנה ברורה, ערוך השולחן, בן איש חי, כף החיים, חזון איש
-• פסיקה עדכנית — שו"ת מרן הגר"מ פיינשטיין, הגר"ע יוסף, הגרש"ז אויערבאך
+• פסיקה עדכנית — שו"ת הגר"מ פיינשטיין, הגר"ע יוסף, הגרש"ז אויערבאך
 
-חוקי תשובה מחייבים:
-א. פתח תמיד בפסוק רלוונטי מהתורה או מהנביאים אם ישנו.
-ב. חלק את תשובתך לסעיפים ברורים עם כותרות מודגשות.
+כללי תשובה מחייבים:
+א. פתח בפסוק רלוונטי מהתורה או הנביאים אם ישנו.
+ב. חלק לסעיפים ברורים עם כותרות מודגשות.
 ג. ציין מקורות מדויקים: שם הספר + פרק + סעיף/דף/הלכה.
 ד. כאשר יש מחלוקת — הצג את כל הדעות בשם אומריהן.
-ה. הבדל בבירור בין הלכה למעשה לבין דיון תיאורטי.
-ו. סיים תמיד בסיכום מעשי ברור: "למעשה..."
-ז. כתוב אך ורק בעברית — אל תשתמש באנגלית כלל.
-ח. אל תקצר — תשובה מקיפה ומפורטת עדיפה תמיד.
-ט. השתמש במונחים תורניים מדויקים (לאו, עשה, דאורייתא, דרבנן וכו').
-י. כבד את קדושת הנושא — כתוב בסגנון מלומד ומכובד.
+ה. הבדל בין הלכה למעשה לדיון תיאורטי.
+ו. סיים תמיד בסיכום מעשי: "למעשה..."
+ז. כתוב אך ורק בעברית.
+ח. תשובה מקיפה ומפורטת — אל תקצר."""
 
-השאלה: {user_question.strip()}"""
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.7,
+                safety_settings=[
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",        threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+                ]
+            )
 
             st.markdown("### ✍️ תשובת ג'מי תורה:")
             answer_placeholder = st.empty()
             full_response = ""
 
             with st.spinner("...ג'מי תורה מעיין במקורות ויוצר תשובה מפורטת"):
-                stream = model.generate_content(
-                    system_prompt,
-                    safety_settings=disable_safety,
-                    stream=True
-                )
-                for chunk in stream:
-                    if hasattr(chunk, "text") and chunk.text:
+                for chunk in client.models.generate_content_stream(
+                    model="gemini-1.5-flash",
+                    contents=user_question.strip(),
+                    config=config
+                ):
+                    if chunk.text:
                         full_response += chunk.text
                         answer_placeholder.markdown(
                             f'<div class="answer-box">{full_response}▌</div>',
@@ -240,7 +266,6 @@ if user_question and user_question.strip():
             )
             st.balloons()
 
-            # שמור בהיסטוריה
             st.session_state.history.insert(0, {
                 "q": user_question.strip(),
                 "a": full_response
@@ -250,18 +275,18 @@ if user_question and user_question.strip():
         except Exception as e:
             err = str(e)
             if "quota" in err.lower() or "429" in err:
-                st.error("⚠️ חרגת ממכסת השימוש החינמית. נסה שוב בעוד מספר שניות, או בדוק את מפתח ה-API שלך.")
-            elif "api_key" in err.lower() or "401" in err:
+                st.error("⚠️ חרגת ממכסת השימוש. נסה שוב בעוד מספר שניות.")
+            elif "401" in err or "api_key" in err.lower():
                 st.error("⚠️ מפתח ה-API שגוי. בדוק את ה-Secrets ב-Streamlit.")
             else:
-                st.error(f"❌ שגיאה טכנית: {err}")
+                st.error(f"❌ שגיאה: {err}")
 
-# ── היסטוריה ────────────────────────────────────────────────
+# ── היסטוריה ─────────────────────────────────────────────────────
 if st.session_state.history:
     st.write("---")
     st.markdown("### 📚 שאלות קודמות:")
-    for i, item in enumerate(st.session_state.history[:5]):
-        with st.expander(f"🔹 {item['q'][:60]}{'...' if len(item['q']) > 60 else ''}"):
+    for item in st.session_state.history[:5]:
+        with st.expander(f"🔹 {item['q'][:70]}{'...' if len(item['q']) > 70 else ''}"):
             st.markdown(
                 f'<div class="answer-box" style="font-size:14px">{item["a"]}</div>',
                 unsafe_allow_html=True
