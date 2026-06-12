@@ -126,7 +126,7 @@ if "history"           not in st.session_state: st.session_state.history        
 if "selected_question" not in st.session_state: st.session_state.selected_question = ""
 
 # ── שאלות לדוגמה ─────────────────────────────────────────────────
-st.markdown('<p style="color:#c5a059; font-weight:600;">💡 שאלות לדוגמה — לחץ כדי לשאול:</p>', unsafe_allow_html=True)
+st.markdown('<p style="color:#c5a059; font-weight:600;">💡 שאלות לדוגמה — לחץ כדי שאול:</p>', unsafe_allow_html=True)
 examples = ["מה הלכות שבת לגבי חשמל?", "מקור מצוות כיבוד אב ואם", "דיני אבילות שבעה", "הלכות כשרות בסיסיות"]
 for i, (col, q) in enumerate(zip(st.columns(4), examples)):
     if col.button(q, key=f"ex_{i}", use_container_width=True):
@@ -144,11 +144,8 @@ if user_question and user_question.strip():
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
     else:
-        raw_key = str(st.secrets["GEMINI_API_KEY"])
-        clean_key = raw_key.strip().replace('"', '').replace("'", "")
+        clean_key = str(st.secrets["GEMINI_API_KEY"]).strip().replace('"', '').replace("'", "")
         
-        st.info(f"🔍 דיאגנוסטיקה: אורך המפתח שנשלח לגוגל הוא {len(clean_key)} תווים. (מתחיל ב: {clean_key[:5]}...)")
-
         with st.spinner("🔍 מחפש מקורות ממאגר ספריא..."):
             sources = search_sefaria(user_question.strip())
 
@@ -175,8 +172,7 @@ if user_question and user_question.strip():
         )
         full_prompt = user_question.strip() + context_block
 
-        # רשימת מודלים רחבה - כולל 1.5 פלאש האולטרה-יציב למקרה ש-2.0 חסום אצלך במכסה
-        MODELS = ["gemini-1.5-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash"]
+        MODELS = ["gemini-1.5-flash", "gemini-2.0-flash"]
 
         st.markdown("### ✍️ תשובת ג'מי תורה:")
         answer_placeholder = st.empty()
@@ -186,37 +182,30 @@ if user_question and user_question.strip():
         for model_name in MODELS:
             if success:
                 break
-            for attempt in range(2):
-                try:
-                    full_response = ""
-                    with st.spinner(f"מעיין במקורות באמצעות {model_name}..."):
-                        for chunk in client.models.generate_content_stream(
-                            model=model_name, contents=full_prompt, config=config
-                        ):
-                            if chunk.text:
-                                full_response += chunk.text
-                                answer_placeholder.markdown(f'<div class="answer-box">{full_response}▌</div>', unsafe_allow_html=True)
-                    
-                    answer_placeholder.markdown(f'<div class="answer-box">{full_response}</div>', unsafe_allow_html=True)
-                    st.balloons()
-                    st.session_state.history.insert(0, {"q": user_question.strip(), "a": full_response})
-                    st.session_state.selected_question = ""
-                    success = True
-                    break
-                except Exception as e:
-                    last_error = str(e)
-                    # אם המכסה היא 0, אין טעם לנסות שוב את אותו מודל, נעבור מיד למודל הבא ברשימה
-                    if "limit: 0" in last_error or "RESOURCE_EXHAUSTED" in last_error:
-                        break
-                    time.sleep(1)
+            try:
+                full_response = ""
+                with st.spinner(f"מעיין במקורות..."):
+                    for chunk in client.models.generate_content_stream(
+                        model=model_name, contents=full_prompt, config=config
+                    ):
+                        if chunk.text:
+                            full_response += chunk.text
+                            answer_placeholder.markdown(f'<div class="answer-box">{full_response}▌</div>', unsafe_allow_html=True)
+                
+                answer_placeholder.markdown(f'<div class="answer-box">{full_response}</div>', unsafe_allow_html=True)
+                st.balloons()
+                st.session_state.history.insert(0, {"q": user_question.strip(), "a": full_response})
+                st.session_state.selected_question = ""
+                success = True
+                break
+            except Exception as e:
+                last_error = str(e)
+                continue
 
         if not success:
             st.error(
-                f"⚠️ שגיאת מכסה של גוגל: {last_error}\n\n"
-                "**איך פותרים את זה עכשיו?**\n"
-                "1. כנס ל-aistudio.google.com\n"
-                "2. לחץ על יצירת מפתח חדש, ובחר בתוך פרויקט חדש (**New Project**).\n"
-                "3. שים את המפתח החדש ב-Secrets ב-Streamlit ולחץ Save."
+                f"⚠️ שגיאת חיבור לגוגל: {last_error}\n\n"
+                "ודא שמפתח ה-API שהגדרת ב-Secrets של Streamlit עדיין בתוקף."
             )
 
 if st.session_state.history:
