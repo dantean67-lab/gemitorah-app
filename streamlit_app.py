@@ -237,6 +237,13 @@ if user_question and user_question.strip():
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
     else:
+        # ניקוי המפתח ממרכאות או רווחים מיותרים שעלולים לגרום לשגיאת 400
+        raw_key = str(st.secrets["GEMINI_API_KEY"])
+        clean_key = raw_key.strip().replace('"', '').replace("'", "")
+        
+        # שורת דיאגנוסטיקה - תופיע בצהוב מעל התשובה
+        st.info(f"🔍 דיאגנוסטיקה: אורך המפתח שנשלח לגוגל הוא {len(clean_key)} תווים. (מתחיל ב: {clean_key[:5]}...)")
+
         # שלב א׳ — חיפוש ספריא
         with st.spinner("🔍 מחפש מקורות ממאגר ספריא..."):
             sources = search_sefaria(user_question.strip())
@@ -280,7 +287,7 @@ if user_question and user_question.strip():
 ז. כתוב בעברית בלבד. תשובה מקיפה — אל תקצר."""
 
         # שלב ג׳ — קריאה ל-Gemini, מנסה שני מודלים
-        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        client = genai.Client(api_key=clean_key)
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             temperature=0.65,
@@ -339,11 +346,11 @@ if user_question and user_question.strip():
 
         if not success:
             st.error(
-                "⚠️ מכסת השימוש היומית אזלה.\n\n"
+                "⚠️ יש בעיה בחיבור לשרת או שמכסת השימוש אזלה.\n\n"
+                f"**פרטי שגיאה למפתח:** {err}\n\n"
                 "**מה לעשות:**\n"
-                "1. כנס ל-aistudio.google.com/apikey\n"
-                "2. צור מפתח חדש בפרויקט חדש\n"
-                "3. עדכן את ה-Secrets ב-Streamlit"
+                "1. בדוק את ה-API Key\n"
+                "2. כנס ל-aistudio.google.com/apikey וודא שהמפתח פעיל"
             )
 
 # ── היסטוריה ─────────────────────────────────────────────────────
