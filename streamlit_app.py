@@ -24,10 +24,9 @@ def strip_html(text: str) -> str:
 
 def search_local_kitzur(query: str, max_chars: int = 2000) -> str:
     try:
-        path = "kitzur_shulchan_aruch.txt"
-        if not os.path.exists(path):
+        if not os.path.exists("kitzur_shulchan_aruch.txt"):
             return ""
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        with open("kitzur_shulchan_aruch.txt", "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
         keywords = [w for w in query.split() if len(w) > 2]
         if not keywords:
@@ -37,8 +36,8 @@ def search_local_kitzur(query: str, max_chars: int = 2000) -> str:
         for i, line in enumerate(lines):
             score = sum(1 for kw in keywords if kw in line)
             if score > 0:
-                start = max(0, i - 1)
-                end   = min(len(lines), i + 6)
+                start   = max(0, i - 1)
+                end     = min(len(lines), i + 6)
                 section = "\n".join(lines[start:end]).strip()
                 if len(section) > 20:
                     scored.append((score, section))
@@ -186,7 +185,6 @@ if user_question and user_question.strip():
     if "GEMINI_API_KEY" not in st.secrets:
         st.error("⚠️ מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
     else:
-        # קח את המפתח בדיוק כמו שהוא — ללא שינויים
         api_key = str(st.secrets["GEMINI_API_KEY"]).strip()
 
         with st.spinner("🔍 מחפש מקורות..."):
@@ -229,7 +227,9 @@ if user_question and user_question.strip():
             ]
         )
         full_prompt = user_question.strip() + context
-        MODELS = ["gemini-2.0-flash-lite", "gemini-2.0-flash"]
+
+        # מודל יחיד ישיר — ללא ניסיונות מיותרים
+        MODELS = ["gemini-2.0-flash", "gemini-1.5-pro"]
 
         st.markdown("### ✍️ תשובת ג'מי תורה:")
         placeholder = st.empty()
@@ -237,41 +237,73 @@ if user_question and user_question.strip():
 
         for model_name in MODELS:
             if success: break
-            for attempt in range(3):
-                try:
-                    full_response = ""
-                    with st.spinner("...ג'מי תורה מעיין במקורות"):
-                        for chunk in client.models.generate_content_stream(
-                            model=model_name, contents=full_prompt, config=config
-                        ):
-                            if chunk.text:
-                                full_response += chunk.text
-                                placeholder.markdown(
-                                    f'<div class="answer-box">{full_response}▌</div>',
-                                    unsafe_allow_html=True
-                                )
-                    placeholder.markdown(
-                        f'<div class="answer-box">{full_response}</div>',
-                        unsafe_allow_html=True
-                    )
-                    st.balloons()
-                    st.session_state.history.insert(0, {"q": user_question.strip(), "a": full_response})
-                    st.session_state.selected_question = ""
-                    success = True
-                    break
-                except Exception as e:
-                    last_err = str(e)
-                    is_rate = any(x in last_err for x in ["429","quota","RESOURCE_EXHAUSTED","503","UNAVAILABLE"])
-                    if is_rate and attempt < 2:
-                        time.sleep(3 * (attempt + 1))
-                    else:
-                        break
+            try:
+                full_response = ""
+                with st.spinner(f"...ג'מי תורה מעיין במקורות ({model_name})"):
+                    for chunk in client.models.generate_content_stream(
+                        model=model_name, contents=full_prompt, config=config
+                    ):
+                        if chunk.text:
+                            full_response += chunk.text
+                            placeholder.markdown(
+                                f'<div class="answer-box">{full_response}▌</div>',
+                                unsafe_allow_html=True
+                            )
+                placeholder.markdown(
+                    f'<div class="answer-box">{full_response}</div>',
+                    unsafe_allow_html=True
+                )
+                st.balloons()
+                st.session_state.history.insert(0, {"q": user_question.strip(), "a": full_response})
+                st.session_state.selected_question = ""
+                success = True
+
+            except Exception as e:
+                last_err = str(e)
+                is_rate = any(x in last_err for x in ["429","RESOURCE_EXHAUSTED"])
+                is_busy = any(x in last_err for x in ["503","UNAVAILABLE","high demand"])
+
+                if is_rate:
+                    # המתן 65 שניות ונסה שוב — זו מגבלת דקה לא מגבלת יום
+                    countdown = st.empty()
+                    for i in range(65, 0, -1):
+                        countdown.info(f"⏳ שרת גוגל עמוס — מנסה שוב בעוד {i} שניות...")
+                        time.sleep(1)
+                    countdown.empty()
+                    try:
+                        full_response = ""
+                        with st.spinner(f"...מנסה שוב ({model_name})"):
+                            for chunk in client.models.generate_content_stream(
+                                model=model_name, contents=full_prompt, config=config
+                            ):
+                                if chunk.text:
+                                    full_response += chunk.text
+                                    placeholder.markdown(
+                                        f'<div class="answer-box">{full_response}▌</div>',
+                                        unsafe_allow_html=True
+                                    )
+                        placeholder.markdown(
+                            f'<div class="answer-box">{full_response}</div>',
+                            unsafe_allow_html=True
+                        )
+                        st.balloons()
+                        st.session_state.history.insert(0, {"q": user_question.strip(), "a": full_response})
+                        st.session_state.selected_question = ""
+                        success = True
+                    except Exception as e2:
+                        last_err = str(e2)
+                elif is_busy:
+                    time.sleep(5)
+                # אחרת — עבור למודל הבא
 
         if not success:
-            if "401" in last_err or "UNAUTHENTICATED" in last_err:
-                st.error("⚠️ שגיאת אימות (401). לחץ על סמל ההעתקה 📋 ליד המפתח ב-AI Studio ועדכן ב-Secrets.")
-            elif any(x in last_err for x in ["429","quota","RESOURCE_EXHAUSTED"]):
-                st.error("⚠️ מכסה יומית אזלה. צור פרויקט חדש ב-AI Studio ומפתח חדש.")
+            if any(x in last_err for x in ["401","UNAUTHENTICATED"]):
+                st.error("⚠️ מפתח API שגוי. לחץ על 📋 ב-AI Studio להעתקת המפתח ועדכן ב-Secrets.")
+            elif any(x in last_err for x in ["429","RESOURCE_EXHAUSTED","quota"]):
+                st.error(
+                    "⚠️ מגבלת שימוש — נסה שוב בעוד כמה דקות.\n\n"
+                    "אם הבעיה חוזרת, כנס ל-AI Studio ← Rate Limit ← בדוק את השימוש שלך."
+                )
             else:
                 st.error(f"❌ שגיאה: {last_err}")
 
