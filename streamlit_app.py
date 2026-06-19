@@ -12,11 +12,7 @@ st.set_page_config(
 )
 
 # ── קבועי תצורה ────────────────────────────────────────────────
-MODELS = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-pro",
-]
+MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
 SEFARIA_DEEP     = 6
 SEFARIA_QUICK    = 3
 REQUEST_TIMEOUT  = 90
@@ -24,10 +20,8 @@ TEMPERATURE      = 0.65
 KITZUR_MAX_CHARS = 1500
 KITZUR_SECTIONS  = 3
 HISTORY_MAX      = 5
-
-# !! URL נקייה — ללא עיצוב Markdown !!
-GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-SEFARIA_URL = "https://www.sefaria.org/api/search-wrapper"
+GEMINI_BASE      = "https://generativelanguage.googleapis.com/v1beta/models"
+SEFARIA_URL      = "https://www.sefaria.org/api/search-wrapper"
 
 SYSTEM_DEEP = """אתה ג'מי תורה — מנוע בינה מלאכותית תורני ברמת גדול הדור.
 חובה לבסס את תשובתך על המקורות שצורפו.
@@ -109,7 +103,7 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
 }
 .source-ref  { color:#c5a059; font-weight:700; font-size:14px; margin-bottom:4px; }
 .source-text { color:#c8bfa8; font-size:13px; line-height:1.7; }
-.key-debug {
+.debug-line {
     font-family:monospace; font-size:11px; color:#4a9960;
     background:#0a1a0a; border:1px solid #1a3a1a; border-radius:6px;
     padding:4px 10px; margin-bottom:12px; direction:ltr; text-align:left;
@@ -156,27 +150,16 @@ def clean_query(query):
     ).strip()
 
 def get_api_key() -> str:
-    """
-    טוען מפתח API — קודם מ-env variables, אחר כך מ-Streamlit secrets.
-    מציג 10 תווים ראשונים לאימות.
-    """
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         try:
             key = str(st.secrets["GEMINI_API_KEY"]).strip()
         except Exception:
-            st.error(
-                "⚠️ מפתח ה-API לא נמצא!\n\n"
-                "ב-Streamlit Cloud: Manage app → Settings → Secrets → הוסף:\n"
-                "`GEMINI_API_KEY = \"המפתח-שלך\"`\n\n"
-                "ב-Codespaces: ערוך `.streamlit/secrets.toml`"
-            )
+            st.error("⚠️ מפתח API לא נמצא. הגדר GEMINI_API_KEY ב-Secrets.")
             st.stop()
-
-    if not key or len(key) < 10:
-        st.error("⚠️ המפתח שנמצא קצר מדי או ריק. בדוק את ה-Secrets.")
+    if len(key) < 10:
+        st.error("⚠️ המפתח קצר מדי. בדוק את ה-Secrets.")
         st.stop()
-
     return key
 
 def search_local_kitzur(query: str) -> str:
@@ -207,7 +190,7 @@ def search_sefaria(query: str, size: int) -> list:
     def _fetch(q):
         try:
             r = requests.get(
-                SEFARIA_URL,  # URL נקייה — מוגדרת למעלה
+                SEFARIA_URL,
                 params={"query": q, "type": "text", "size": size, "field": "naive_lemmatizer"},
                 timeout=7
             )
@@ -229,62 +212,79 @@ def search_sefaria(query: str, size: int) -> list:
         _fetch(kw)
     return results[:size]
 
-def call_gemini(api_key: str, prompt: str, system: str) -> str:
-    """קריאה ישירה ל-Gemini REST API — ללא SDK — עם retry חכם."""
+def call_gemini(api_key: str, prompt: str, system: str) -> tuple[str, str]:
+    """
+    קריאה ל-Gemini REST API.
+    מנסה 3 שיטות אימות שונות — חשוב במיוחד למפתחות בפורמט AQ.
+    מחזיר (תשובה, שיטת_אימות_שעבדה)
+    """
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "systemInstruction": {"parts": [{"text": system}]},
         "generationConfig": {"temperature": TEMPERATURE, "maxOutputTokens": 4096},
         "safetySettings": SAFETY,
     }
+
+    # שלוש שיטות אימות — הקוד ינסה כל אחת
+    auth_methods = [
+        ("x-goog-api-key header",
+         {"x-goog-api-key": api_key, "Content-Type": "application/json"},
+         {}),
+        ("Bearer token",
+         {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+         {}),
+        ("?key= query param",
+         {"Content-Type": "application/json"},
+         {"key": api_key}),
+    ]
+
     last_err = ""
     for model in MODELS:
-        for attempt in range(3):
-            try:
-                url  = f"{GEMINI_BASE}/{model}:generateContent"
-                resp = requests.post(
-                    url,
-                    params={"key": api_key},
-                    json=payload,
-                    timeout=REQUEST_TIMEOUT,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
+        for method_name, headers, params in auth_methods:
+            for attempt in range(2):
+                try:
+                    url  = f"{GEMINI_BASE}/{model}:generateContent"
+                    resp = requests.post(
+                        url,
+                        headers=headers,
+                        params=params,
+                        json=payload,
+                        timeout=REQUEST_TIMEOUT,
+                    )
 
-                err_body = resp.json()
-                code = err_body.get("error", {}).get("code", resp.status_code)
-                msg  = err_body.get("error", {}).get("message", str(err_body))
-                last_err = f"{code}: {msg}"
+                    if resp.status_code == 200:
+                        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+                        return text, f"{model} via {method_name}"
 
-                if code == 429:
-                    time.sleep(2 ** attempt * 5)  # 5 → 10 → 20 שניות
-                elif code in (400, 404):
-                    break  # מודל לא זמין — נסה הבא
-                elif code == 401:
-                    raise Exception("401 UNAUTHENTICATED — מפתח שגוי")
-                else:
-                    time.sleep(3)
+                    err_body  = resp.json()
+                    code      = err_body.get("error", {}).get("code", resp.status_code)
+                    msg       = err_body.get("error", {}).get("message", "")
+                    last_err  = f"{code}: {msg[:200]}"
 
-            except requests.exceptions.Timeout:
-                last_err = "timeout"
-                break
-            except Exception as e:
-                last_err = str(e)
-                if "401" in last_err:
-                    raise
-                break
+                    if code == 429:
+                        time.sleep(2 ** attempt * 5)
+                    elif code in (400, 404, 401, 403):
+                        break  # נסה שיטה/מודל הבא
+                    else:
+                        time.sleep(3)
+
+                except requests.exceptions.Timeout:
+                    last_err = "timeout"
+                    break
+                except Exception as e:
+                    last_err = str(e)[:200]
+                    break
+
     raise Exception(last_err)
 
 # ── ממשק ─────────────────────────────────────────────────────────
 st.markdown(CSS, unsafe_allow_html=True)
-
-# טוען מפתח — עם הגנה מפני קריסה
 api_key = get_api_key()
 
-# DEBUG: הצג 12 תווים ראשונים של המפתח הנטען
+# DEBUG: מציג מפתח וסוגו
+key_type = "AQ. (new format)" if api_key.startswith("AQ.") else "AIzaSy (classic)" if api_key.startswith("AIza") else "unknown"
 st.markdown(
-    f'<div class="key-debug">🔑 KEY: {api_key[:12]}... | LEN: {len(api_key)}</div>',
+    f'<div class="debug-line">🔑 KEY: {api_key[:12]}... | LEN: {len(api_key)} | TYPE: {key_type}</div>',
     unsafe_allow_html=True
 )
 
@@ -302,12 +302,10 @@ st.markdown(f"""
   {img_tag}
 </div>""", unsafe_allow_html=True)
 
-# ── session state ────────────────────────────────────────────────
 for k in ["history", "deep_q", "quick_q", "deep_ans", "quick_ans", "_last_deep", "_last_quick"]:
     if k not in st.session_state:
         st.session_state[k] = [] if k == "history" else ""
 
-# ── שאלות לדוגמה ────────────────────────────────────────────────
 st.markdown('<p style="color:#c5a059;font-weight:600;">💡 שאלות לדוגמה:</p>', unsafe_allow_html=True)
 EXAMPLES = [
     "מה הלכות שבת לגבי חשמל?",
@@ -324,7 +322,6 @@ for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
         })
         st.rerun()
 
-# ── לשוניות ─────────────────────────────────────────────────────
 tab_deep, tab_quick = st.tabs([
     "🏛️   עיון מעמיק — תשובה מפורטת",
     "⚡   בירור מהיר — תשובה תמציתית",
@@ -357,11 +354,11 @@ def build_context(kitzur, sources) -> str:
     return "\n\n".join(parts)
 
 def handle_error(err: str, api_key: str):
-    if "401" in err or "UNAUTHENTICATED" in err:
+    if "401" in err or "403" in err or "UNAUTHENTICATED" in err or "PERMISSION_DENIED" in err:
         st.error(
-            f"⚠️ **מפתח API לא תקין (401)**\n\n"
-            f"המפתח הנוכחי: `{api_key[:12]}...` (אורך: {len(api_key)})\n\n"
-            "פתרון: עדכן Secrets ב-Streamlit ← Reboot app"
+            f"⚠️ **שגיאת אימות**\n\n"
+            f"המפתח `{api_key[:12]}...` לא מתקבל על ידי גוגל.\n\n"
+            "**פתרון:** כנס ל-aistudio.google.com ← בדוק שהמפתח פעיל ← העתק מחדש ← עדכן Secrets"
         )
     elif "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
         st.error(
@@ -414,8 +411,9 @@ with tab_deep:
         ph = st.empty()
         ph.info("⏳ ג'מי תורה מעיין במקורות... (עד 30 שניות)")
         try:
-            ans = call_gemini(api_key, prompt, SYSTEM_DEEP)
+            ans, used_method = call_gemini(api_key, prompt, SYSTEM_DEEP)
             ph.markdown(f'<div class="answer-box">{ans}</div>', unsafe_allow_html=True)
+            st.caption(f"✅ הופעל: {used_method}")
             st.session_state.deep_ans = ans
             st.session_state.history  = (
                 [{"q": q_deep.strip(), "a": ans}] + st.session_state.history
@@ -458,11 +456,12 @@ with tab_quick:
         ph_q = st.empty()
         ph_q.info("⏳ מחפש תשובה...")
         try:
-            ans_q = call_gemini(api_key, prompt_q, SYSTEM_QUICK)
+            ans_q, used_method_q = call_gemini(api_key, prompt_q, SYSTEM_QUICK)
             ph_q.markdown(
                 f'<div class="answer-box-quick">{ans_q}</div>',
                 unsafe_allow_html=True
             )
+            st.caption(f"✅ הופעל: {used_method_q}")
             st.session_state.quick_ans = ans_q
         except Exception as e:
             ph_q.empty()
