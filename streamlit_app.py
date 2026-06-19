@@ -4,8 +4,6 @@ import time
 import base64
 import requests
 import streamlit as st
-from google import genai
-from google.genai import types
 
 st.set_page_config(
     page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית",
@@ -14,14 +12,22 @@ st.set_page_config(
 )
 
 # ── קבועי תצורה ────────────────────────────────────────────────
-MODELS           = ["gemini-2.0-flash"]
-SEFARIA_DEEP     = 8
+MODELS = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-pro",
+]
+SEFARIA_DEEP     = 6
 SEFARIA_QUICK    = 3
-REQUEST_TIMEOUT  = 7
+REQUEST_TIMEOUT  = 90
 TEMPERATURE      = 0.65
-KITZUR_MAX_CHARS = 2000
-KITZUR_SECTIONS  = 4
+KITZUR_MAX_CHARS = 1500
+KITZUR_SECTIONS  = 3
 HISTORY_MAX      = 5
+
+# !! URL נקייה — ללא עיצוב Markdown !!
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+SEFARIA_URL = "https://www.sefaria.org/api/search-wrapper"
 
 SYSTEM_DEEP = """אתה ג'מי תורה — מנוע בינה מלאכותית תורני ברמת גדול הדור.
 חובה לבסס את תשובתך על המקורות שצורפו.
@@ -59,14 +65,14 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
     color:#f4ecd8 !important; font-size:2.8rem !important;
     font-weight:800; margin:0 0 8px 0 !important; white-space:nowrap;
 }
-.premium-header p  { color:#c5a059 !important; font-size:1.2rem !important; margin:0 !important; }
-.rabbi-banner-img  {
+.premium-header p { color:#c5a059 !important; font-size:1.2rem !important; margin:0 !important; }
+.rabbi-banner-img {
     width:200px; border-radius:14px;
     border:3px solid #c5a059; box-shadow:0 6px 25px rgba(0,0,0,0.5); flex-shrink:0;
 }
 @media (max-width:768px) {
     .block-container { padding-left:1rem !important; padding-right:1rem !important; }
-    .premium-header  {
+    .premium-header {
         flex-direction:column !important; align-items:center !important;
         padding:24px 20px !important; gap:16px !important;
     }
@@ -97,17 +103,20 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
     padding:20px 24px; color:#f0e6d3; font-size:15px; line-height:1.9;
     direction:rtl; text-align:right;
 }
-.source-box  {
+.source-box {
     background:#0d1e2e; border-right:4px solid #c5a059;
     border-radius:8px; padding:12px 16px; margin-bottom:10px;
 }
 .source-ref  { color:#c5a059; font-weight:700; font-size:14px; margin-bottom:4px; }
 .source-text { color:#c8bfa8; font-size:13px; line-height:1.7; }
-#MainMenu,footer,header                                    { visibility:hidden !important; }
-[data-testid="manage-app-button"],
-[data-testid="stToolbarActions"],
-[data-testid="stToolbar"],
-.stDeployButton                                            { display:none !important; }
+.key-debug {
+    font-family:monospace; font-size:11px; color:#4a9960;
+    background:#0a1a0a; border:1px solid #1a3a1a; border-radius:6px;
+    padding:4px 10px; margin-bottom:12px; direction:ltr; text-align:left;
+}
+#MainMenu,footer,header { visibility:hidden !important; }
+[data-testid="manage-app-button"],[data-testid="stToolbarActions"],
+[data-testid="stToolbar"],.stDeployButton { display:none !important; }
 </style>
 <script>
 (function(){
@@ -118,32 +127,63 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
         .forEach(el=>el.style.setProperty('display','none','important')));
     };
     new MutationObserver(h).observe(document.documentElement,{childList:true,subtree:true});
-    h(); setTimeout(h,1000); setTimeout(h,3000);
+    h();setTimeout(h,1000);setTimeout(h,3000);
 })();
 </script>
 """
 
+SAFETY = [
+    {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+]
+
 # ── עזרים ──────────────────────────────────────────────────────
-def get_base64_image(path: str):
+def get_base64_image(path):
     if os.path.exists(path):
-        with open(path,"rb") as f:
+        with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode()
     return None
 
-def strip_html(text: str) -> str:
-    return re.sub(r'<[^>]+>',' ',text).strip()
+def strip_html(text):
+    return re.sub(r'<[^>]+>', ' ', text).strip()
 
-def clean_query(query: str) -> str:
+def clean_query(query):
     return re.sub(
         r'\b(מה|האם|כיצד|למה|מדוע|איך|מתי|היכן|מי|הסבר|פרט|ספר)\b',
         '', query
     ).strip()
 
+def get_api_key() -> str:
+    """
+    טוען מפתח API — קודם מ-env variables, אחר כך מ-Streamlit secrets.
+    מציג 10 תווים ראשונים לאימות.
+    """
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        try:
+            key = str(st.secrets["GEMINI_API_KEY"]).strip()
+        except Exception:
+            st.error(
+                "⚠️ מפתח ה-API לא נמצא!\n\n"
+                "ב-Streamlit Cloud: Manage app → Settings → Secrets → הוסף:\n"
+                "`GEMINI_API_KEY = \"המפתח-שלך\"`\n\n"
+                "ב-Codespaces: ערוך `.streamlit/secrets.toml`"
+            )
+            st.stop()
+
+    if not key or len(key) < 10:
+        st.error("⚠️ המפתח שנמצא קצר מדי או ריק. בדוק את ה-Secrets.")
+        st.stop()
+
+    return key
+
 def search_local_kitzur(query: str) -> str:
     try:
         if not os.path.exists("kitzur_shulchan_aruch.txt"):
             return ""
-        with open("kitzur_shulchan_aruch.txt","r",encoding="utf-8",errors="ignore") as f:
+        with open("kitzur_shulchan_aruch.txt", "r", encoding="utf-8", errors="ignore") as f:
             lines = f.read().split("\n")
         keywords = [w for w in query.split() if len(w) > 2]
         if not keywords:
@@ -152,7 +192,7 @@ def search_local_kitzur(query: str) -> str:
         for i, line in enumerate(lines):
             score = sum(1 for kw in keywords if kw in line)
             if score > 0:
-                section = "\n".join(lines[max(0,i-1):min(len(lines),i+6)]).strip()
+                section = "\n".join(lines[max(0, i-1):min(len(lines), i+5)]).strip()
                 if len(section) > 20:
                     scored.append((score, section))
         if not scored:
@@ -167,19 +207,19 @@ def search_sefaria(query: str, size: int) -> list:
     def _fetch(q):
         try:
             r = requests.get(
-                "https://www.sefaria.org/api/search-wrapper",
-                params={"query":q,"type":"text","size":size,"field":"naive_lemmatizer"},
-                timeout=REQUEST_TIMEOUT
+                SEFARIA_URL,  # URL נקייה — מוגדרת למעלה
+                params={"query": q, "type": "text", "size": size, "field": "naive_lemmatizer"},
+                timeout=7
             )
-            for hit in r.json().get("hits",{}).get("hits",[]):
-                src = hit.get("_source",{})
-                ref = src.get("ref","")
-                he  = strip_html(src.get("he",""))
+            for hit in r.json().get("hits", {}).get("hits", []):
+                src = hit.get("_source", {})
+                ref = src.get("ref", "")
+                he  = strip_html(src.get("he", ""))
                 if ref and he and len(he) > 15 and ref not in seen:
                     seen.add(ref)
                     results.append({
                         "heRef": src.get("heRef", ref),
-                        "he":    he[:500] + ("..." if len(he) > 500 else "")
+                        "he":    he[:400] + ("..." if len(he) > 400 else "")
                     })
         except Exception:
             pass
@@ -189,48 +229,64 @@ def search_sefaria(query: str, size: int) -> list:
         _fetch(kw)
     return results[:size]
 
-def stream_answer(client, prompt: str, system: str, placeholder, box_class="answer-box") -> str:
-    """Gemini streaming עם exponential backoff."""
-    config = types.GenerateContentConfig(
-        system_instruction=system,
-        temperature=TEMPERATURE,
-        safety_settings=[
-            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",        threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
-        ]
-    )
+def call_gemini(api_key: str, prompt: str, system: str) -> str:
+    """קריאה ישירה ל-Gemini REST API — ללא SDK — עם retry חכם."""
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "systemInstruction": {"parts": [{"text": system}]},
+        "generationConfig": {"temperature": TEMPERATURE, "maxOutputTokens": 4096},
+        "safetySettings": SAFETY,
+    }
     last_err = ""
-    for model_name in MODELS:
-        for attempt in range(4):
+    for model in MODELS:
+        for attempt in range(3):
             try:
-                text = ""
-                for chunk in client.models.generate_content_stream(
-                    model=model_name, contents=prompt, config=config
-                ):
-                    if chunk.text:
-                        text += chunk.text
-                        placeholder.markdown(
-                            f'<div class="{box_class}">{text}▌</div>',
-                            unsafe_allow_html=True
-                        )
-                placeholder.markdown(
-                    f'<div class="{box_class}">{text}</div>',
-                    unsafe_allow_html=True
+                url  = f"{GEMINI_BASE}/{model}:generateContent"
+                resp = requests.post(
+                    url,
+                    params={"key": api_key},
+                    json=payload,
+                    timeout=REQUEST_TIMEOUT,
                 )
-                return text
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+
+                err_body = resp.json()
+                code = err_body.get("error", {}).get("code", resp.status_code)
+                msg  = err_body.get("error", {}).get("message", str(err_body))
+                last_err = f"{code}: {msg}"
+
+                if code == 429:
+                    time.sleep(2 ** attempt * 5)  # 5 → 10 → 20 שניות
+                elif code in (400, 404):
+                    break  # מודל לא זמין — נסה הבא
+                elif code == 401:
+                    raise Exception("401 UNAUTHENTICATED — מפתח שגוי")
+                else:
+                    time.sleep(3)
+
+            except requests.exceptions.Timeout:
+                last_err = "timeout"
+                break
             except Exception as e:
                 last_err = str(e)
-                is_rate = any(x in last_err for x in ["429","RESOURCE_EXHAUSTED","quota","503","UNAVAILABLE"])
-                if is_rate and attempt < 3:
-                    time.sleep(2 ** attempt * 3)   # 3 → 6 → 12 שניות
-                else:
-                    break
+                if "401" in last_err:
+                    raise
+                break
     raise Exception(last_err)
 
 # ── ממשק ─────────────────────────────────────────────────────────
 st.markdown(CSS, unsafe_allow_html=True)
+
+# טוען מפתח — עם הגנה מפני קריסה
+api_key = get_api_key()
+
+# DEBUG: הצג 12 תווים ראשונים של המפתח הנטען
+st.markdown(
+    f'<div class="key-debug">🔑 KEY: {api_key[:12]}... | LEN: {len(api_key)}</div>',
+    unsafe_allow_html=True
+)
 
 rabbi_base64 = get_base64_image("rabbi.jpeg") or get_base64_image("rabbi.png")
 img_tag = (
@@ -246,20 +302,12 @@ st.markdown(f"""
   {img_tag}
 </div>""", unsafe_allow_html=True)
 
-# ── session state ─────────────────────────────────────────────────
-if "history"      not in st.session_state: st.session_state.history      = []
-if "deep_q"       not in st.session_state: st.session_state.deep_q       = ""
-if "quick_q"      not in st.session_state: st.session_state.quick_q      = ""
+# ── session state ────────────────────────────────────────────────
+for k in ["history", "deep_q", "quick_q", "deep_ans", "quick_ans", "_last_deep", "_last_quick"]:
+    if k not in st.session_state:
+        st.session_state[k] = [] if k == "history" else ""
 
-# ── בדיקת מפתח ──────────────────────────────────────────────────
-if "GEMINI_API_KEY" not in st.secrets:
-    st.error("⚠️ מפתח ה-API לא הוגדר ב-Secrets של המערכת.")
-    st.stop()
-
-# ✅ ללא http_options — v1beta הוא ברירת המחדל ותומך ב-system_instruction
-client = genai.Client(api_key=str(st.secrets["GEMINI_API_KEY"]).strip())
-
-# ── שאלות לדוגמה (גלובליות, מעל הלשוניות) ───────────────────────
+# ── שאלות לדוגמה ────────────────────────────────────────────────
 st.markdown('<p style="color:#c5a059;font-weight:600;">💡 שאלות לדוגמה:</p>', unsafe_allow_html=True)
 EXAMPLES = [
     "מה הלכות שבת לגבי חשמל?",
@@ -269,23 +317,68 @@ EXAMPLES = [
 ]
 for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
     if col.button(q, key=f"ex_{i}", use_container_width=True):
-        st.session_state.deep_q  = q
-        st.session_state.quick_q = q
+        st.session_state.update({
+            "deep_q": q, "quick_q": q,
+            "deep_ans": "", "quick_ans": "",
+            "_last_deep": "", "_last_quick": "",
+        })
         st.rerun()
 
 # ── לשוניות ─────────────────────────────────────────────────────
 tab_deep, tab_quick = st.tabs([
-    "🏛️  עיון מעמיק — תשובה מפורטת",
-    "⚡  בירור מהיר — תשובה תמציתית",
+    "🏛️   עיון מעמיק — תשובה מפורטת",
+    "⚡   בירור מהיר — תשובה תמציתית",
 ])
 
-# ════════════════════════════════════════════════════════════════
-# TAB 1 — עיון מעמיק
-# ════════════════════════════════════════════════════════════════
+def show_sources(sources):
+    if not sources:
+        return
+    html = "".join(
+        f'<div class="source-box">'
+        f'<div class="source-ref">📖 {s["heRef"]}</div>'
+        f'<div class="source-text">{s["he"]}</div>'
+        f'</div>'
+        for s in sources
+    )
+    with st.expander(f"📚 {len(sources)} מקורות ממאגר ספריא", expanded=False):
+        st.markdown(html, unsafe_allow_html=True)
+
+def build_context(kitzur, sources) -> str:
+    parts = []
+    if kitzur:
+        parts.append(f"מתוך קיצור שולחן ערוך:\n{kitzur}")
+    if sources:
+        src_str = "\n\n".join(
+            f"[{i+1}] {s['heRef']}: {s['he']}" for i, s in enumerate(sources)
+        )
+        parts.append(f"מקורות ממאגר ספריא:\n{src_str}")
+    if parts:
+        parts.append("התבסס על מקורות אלו וציין אותם.")
+    return "\n\n".join(parts)
+
+def handle_error(err: str, api_key: str):
+    if "401" in err or "UNAUTHENTICATED" in err:
+        st.error(
+            f"⚠️ **מפתח API לא תקין (401)**\n\n"
+            f"המפתח הנוכחי: `{api_key[:12]}...` (אורך: {len(api_key)})\n\n"
+            "פתרון: עדכן Secrets ב-Streamlit ← Reboot app"
+        )
+    elif "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
+        st.error(
+            "⚠️ **מכסת ה-API אזלה (429)**\n\n"
+            "**חינם:** Gmail חדש → aistudio.google.com → מפתח חדש → Secrets → Reboot\n\n"
+            "**קבוע:** billing ב-console.cloud.google.com ($5 = 50,000+ בקשות)"
+        )
+    elif "timeout" in err.lower():
+        st.error("⏱️ **פסק זמן** — נסה שוב.")
+    else:
+        st.error(f"❌ שגיאה: {err}")
+
+# ════════════════════ TAB 1 — עיון מעמיק ════════════════════════
 with tab_deep:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
-        'חיפוש נרחב מ-8 מקורות, תשובה מפורטת עם כל הדעות והמחלוקות</p>',
+        'חיפוש נרחב מ-6 מקורות, תשובה מפורטת עם כל הדעות</p>',
         unsafe_allow_html=True
     )
     q_deep = st.text_input(
@@ -299,57 +392,40 @@ with tab_deep:
         unsafe_allow_html=True
     )
 
-    if q_deep and q_deep.strip():
+    if st.session_state.deep_ans:
+        st.markdown("### ✍️ תשובת ג'מי תורה:")
+        st.markdown(
+            f'<div class="answer-box">{st.session_state.deep_ans}</div>',
+            unsafe_allow_html=True
+        )
+
+    if q_deep.strip() and q_deep.strip() != st.session_state._last_deep:
+        st.session_state._last_deep = q_deep.strip()
+        st.session_state.deep_q     = q_deep.strip()
+
         with st.spinner("🔍 מחפש מקורות..."):
             kitzur  = search_local_kitzur(q_deep.strip())
             sources = search_sefaria(q_deep.strip(), SEFARIA_DEEP)
 
-        if sources:
-            html = "".join(
-                f'<div class="source-box">'
-                f'<div class="source-ref">📖 {s["heRef"]}</div>'
-                f'<div class="source-text">{s["he"]}</div>'
-                f'</div>'
-                for s in sources
-            )
-            with st.expander(f"📚 {len(sources)} מקורות ממאגר ספריא", expanded=False):
-                st.markdown(html, unsafe_allow_html=True)
-
-        context_parts = []
-        if kitzur:
-            context_parts.append(f"מתוך קיצור שולחן ערוך:\n{kitzur}")
-        if sources:
-            src_lines = "\n\n".join(f"[{i+1}] {s['heRef']}: {s['he']}" for i,s in enumerate(sources))
-            context_parts.append(f"מקורות ממאגר ספריא:\n{src_lines}")
-        if context_parts:
-            context_parts.append("התבסס על מקורות אלו וציין אותם.")
-
-        prompt = f"שאלה: {q_deep.strip()}\n\n" + "\n\n".join(context_parts)
+        show_sources(sources)
+        prompt = f"שאלה: {q_deep.strip()}\n\n{build_context(kitzur, sources)}"
 
         st.markdown("### ✍️ תשובת ג'מי תורה:")
-        placeholder = st.empty()
+        ph = st.empty()
+        ph.info("⏳ ג'מי תורה מעיין במקורות... (עד 30 שניות)")
         try:
-            answer = stream_answer(client, prompt, SYSTEM_DEEP, placeholder, "answer-box")
-            st.balloons()
-            st.session_state.history = (
-                [{"q": q_deep.strip(), "a": answer}] + st.session_state.history
+            ans = call_gemini(api_key, prompt, SYSTEM_DEEP)
+            ph.markdown(f'<div class="answer-box">{ans}</div>', unsafe_allow_html=True)
+            st.session_state.deep_ans = ans
+            st.session_state.history  = (
+                [{"q": q_deep.strip(), "a": ans}] + st.session_state.history
             )[:HISTORY_MAX]
-            st.session_state.deep_q = ""
+            st.balloons()
         except Exception as e:
-            err = str(e)
-            if any(x in err for x in ["401","UNAUTHENTICATED"]):
-                st.error("⚠️ מפתח API שגוי — עדכן ב-Secrets.")
-            elif any(x in err for x in ["429","RESOURCE_EXHAUSTED","quota"]):
-                st.error(
-                    "⚠️ מכסה יומית אזלה.\n\n"
-                    "**פתרון:** פתח Gmail חדש → aistudio.google.com → צור מפתח → עדכן Secrets."
-                )
-            else:
-                st.error(f"❌ שגיאה: {err}")
+            ph.empty()
+            handle_error(str(e), api_key)
 
-# ════════════════════════════════════════════════════════════════
-# TAB 2 — בירור מהיר
-# ════════════════════════════════════════════════════════════════
+# ════════════════════ TAB 2 — בירור מהיר ════════════════════════
 with tab_quick:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
@@ -362,37 +438,42 @@ with tab_quick:
         key="input_quick"
     )
 
-    if q_quick and q_quick.strip():
+    if st.session_state.quick_ans:
+        st.markdown(
+            f'<div class="answer-box-quick">{st.session_state.quick_ans}</div>',
+            unsafe_allow_html=True
+        )
+
+    if q_quick.strip() and q_quick.strip() != st.session_state._last_quick:
+        st.session_state._last_quick = q_quick.strip()
+        st.session_state.quick_q     = q_quick.strip()
+
         with st.spinner("⚡ מחפש..."):
             sources_q = search_sefaria(q_quick.strip(), SEFARIA_QUICK)
 
-        if sources_q:
-            html = "".join(
-                f'<div class="source-box">'
-                f'<div class="source-ref">📖 {s["heRef"]}</div>'
-                f'<div class="source-text">{s["he"]}</div>'
-                f'</div>'
-                for s in sources_q
-            )
-            with st.expander(f"📚 {len(sources_q)} מקורות", expanded=False):
-                st.markdown(html, unsafe_allow_html=True)
-
+        show_sources(sources_q)
         context_q = "\n".join(f"- {s['heRef']}: {s['he']}" for s in sources_q)
         prompt_q  = f"שאלה: {q_quick.strip()}\n\nמקורות:\n{context_q}\n\nענה בתמצית:"
 
-        placeholder_q = st.empty()
+        ph_q = st.empty()
+        ph_q.info("⏳ מחפש תשובה...")
         try:
-            stream_answer(client, prompt_q, SYSTEM_QUICK, placeholder_q, "answer-box-quick")
-            st.session_state.quick_q = ""
+            ans_q = call_gemini(api_key, prompt_q, SYSTEM_QUICK)
+            ph_q.markdown(
+                f'<div class="answer-box-quick">{ans_q}</div>',
+                unsafe_allow_html=True
+            )
+            st.session_state.quick_ans = ans_q
         except Exception as e:
-            st.error(f"❌ שגיאה: {str(e)}")
+            ph_q.empty()
+            handle_error(str(e), api_key)
 
 # ── היסטוריה ─────────────────────────────────────────────────────
 if st.session_state.history:
     st.write("---")
     st.markdown("### 📚 שאלות קודמות:")
     for item in st.session_state.history:
-        with st.expander(f"🔹 {item['q'][:70]}{'...' if len(item['q']) > 70 else ''}"):
+        with st.expander(f"🔹 {item['q'][:70]}{'...' if len(item['q'])>70 else ''}"):
             st.markdown(
                 f'<div class="answer-box" style="font-size:14px">{item["a"]}</div>',
                 unsafe_allow_html=True
