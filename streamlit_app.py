@@ -1,9 +1,10 @@
 import os
 import re
-import time
 import base64
 import requests
 import streamlit as st
+from google import genai
+from google.genai import types
 
 st.set_page_config(
     page_title="ג'מי תורה - עוזר הלכה ובינה מלאכותית תורנית",
@@ -11,11 +12,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# ── קבועי תצורה ────────────────────────────────────────────────
-MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
+# גרסה ייחודית — אם זה לא מופיע באתר אחרי deploy, הקובץ הזה לא עלה בפועל
+VERSION_TAG = "v2026-06-30-SDK-FIX"
+
+MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"]
 SEFARIA_DEEP     = 6
 SEFARIA_QUICK    = 3
-REQUEST_TIMEOUT  = 90
+REQUEST_TIMEOUT  = 60
 TEMPERATURE      = 0.65
 KITZUR_MAX_CHARS = 1500
 KITZUR_SECTIONS  = 3
@@ -48,6 +51,11 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
     padding-top:2rem !important; padding-bottom:2rem !important;
     padding-left:5rem !important; padding-right:5rem !important;
     max-width:1100px !important;
+}
+.version-banner {
+    background:#7a1f1f; color:#fff; text-align:center;
+    padding:10px; border-radius:8px; margin-bottom:16px;
+    font-family:monospace; font-size:13px; font-weight:700; direction:ltr;
 }
 .premium-header {
     background:linear-gradient(135deg,#0b151f,#142436);
@@ -108,6 +116,11 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
     background:#0a1a0a; border:1px solid #1a3a1a; border-radius:6px;
     padding:4px 10px; margin-bottom:12px; direction:ltr; text-align:left;
 }
+.quota-box {
+    background:#1a1410; border:2px solid #c5a059; border-radius:12px;
+    padding:20px 24px; margin-top:12px;
+}
+.quota-box a { color:#c5a059; }
 #MainMenu,footer,header { visibility:hidden !important; }
 [data-testid="manage-app-button"],[data-testid="stToolbarActions"],
 [data-testid="stToolbar"],.stDeployButton { display:none !important; }
@@ -127,13 +140,12 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
 """
 
 SAFETY = [
-    {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
+    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",        threshold="BLOCK_NONE"),
+    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
 ]
 
-# ── עזרים ──────────────────────────────────────────────────────
 def get_base64_image(path):
     if os.path.exists(path):
         with open(path, "rb") as f:
@@ -212,79 +224,52 @@ def search_sefaria(query: str, size: int) -> list:
         _fetch(kw)
     return results[:size]
 
-def call_gemini(api_key: str, prompt: str, system: str) -> tuple[str, str]:
-    """
-    קריאה ל-Gemini REST API.
-    מנסה 3 שיטות אימות שונות — חשוב במיוחד למפתחות בפורמט AQ.
-    מחזיר (תשובה, שיטת_אימות_שעבדה)
-    """
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "systemInstruction": {"parts": [{"text": system}]},
-        "generationConfig": {"temperature": TEMPERATURE, "maxOutputTokens": 4096},
-        "safetySettings": SAFETY,
-    }
+def call_gemini(api_key: str, prompt: str, system: str):
+    all_errors = []
+    quota_hit  = False
 
-    # שלוש שיטות אימות — הקוד ינסה כל אחת
-    auth_methods = [
-        ("x-goog-api-key header",
-         {"x-goog-api-key": api_key, "Content-Type": "application/json"},
-         {}),
-        ("Bearer token",
-         {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-         {}),
-        ("?key= query param",
-         {"Content-Type": "application/json"},
-         {"key": api_key}),
-    ]
+    try:
+        client = genai.Client(api_key=api_key)
+    except Exception as e:
+        return None, {"errors": [f"Client init: {str(e)[:200]}"], "quota_hit": False}
 
-    last_err = ""
     for model in MODELS:
-        for method_name, headers, params in auth_methods:
-            for attempt in range(2):
-                try:
-                    url  = f"{GEMINI_BASE}/{model}:generateContent"
-                    resp = requests.post(
-                        url,
-                        headers=headers,
-                        params=params,
-                        json=payload,
-                        timeout=REQUEST_TIMEOUT,
-                    )
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=TEMPERATURE,
+                    max_output_tokens=4096,
+                    safety_settings=SAFETY,
+                ),
+            )
+            text = response.text
+            if text:
+                return text, None
+            all_errors.append(f"{model}: תגובה ריקה")
+        except Exception as e:
+            err_str = str(e)
+            all_errors.append(f"{model}: {err_str[:200]}")
+            if "429" in err_str or "quota" in err_str.lower() or "RESOURCE_EXHAUSTED" in err_str:
+                quota_hit = True
 
-                    if resp.status_code == 200:
-                        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-                        return text, f"{model} via {method_name}"
-
-                    err_body  = resp.json()
-                    code      = err_body.get("error", {}).get("code", resp.status_code)
-                    msg       = err_body.get("error", {}).get("message", "")
-                    last_err  = f"{code}: {msg[:200]}"
-
-                    if code == 429:
-                        time.sleep(2 ** attempt * 5)
-                    elif code in (400, 404, 401, 403):
-                        break  # נסה שיטה/מודל הבא
-                    else:
-                        time.sleep(3)
-
-                except requests.exceptions.Timeout:
-                    last_err = "timeout"
-                    break
-                except Exception as e:
-                    last_err = str(e)[:200]
-                    break
-
-    raise Exception(last_err)
+    return None, {"errors": all_errors, "quota_hit": quota_hit}
 
 # ── ממשק ─────────────────────────────────────────────────────────
 st.markdown(CSS, unsafe_allow_html=True)
-api_key = get_api_key()
 
-# DEBUG: מציג מפתח וסוגו
-key_type = "AQ. (new format)" if api_key.startswith("AQ.") else "AIzaSy (classic)" if api_key.startswith("AIza") else "unknown"
+# 🔴 באנר גרסה — אם זה לא מופיע באתר, הקובץ הזה עדיין לא הועלה בפועל!
 st.markdown(
-    f'<div class="debug-line">🔑 KEY: {api_key[:12]}... | LEN: {len(api_key)} | TYPE: {key_type}</div>',
+    f'<div class="version-banner">🔴 CODE VERSION: {VERSION_TAG} — אם אתה רואה את זה, הקובץ עלה בהצלחה</div>',
+    unsafe_allow_html=True
+)
+
+api_key = get_api_key()
+key_type = "AQ. (new)" if api_key.startswith("AQ.") else "AIzaSy (classic)" if api_key.startswith("AIza") else "unknown"
+st.markdown(
+    f'<div class="debug-line">🔑 KEY: {api_key[:12]}... | LEN: {len(api_key)} | TYPE: {key_type} | MODELS: {", ".join(MODELS)}</div>',
     unsafe_allow_html=True
 )
 
@@ -353,36 +338,52 @@ def build_context(kitzur, sources) -> str:
         parts.append("התבסס על מקורות אלו וציין אותם.")
     return "\n\n".join(parts)
 
-def handle_error(err: str, api_key: str):
-    if "401" in err or "403" in err or "UNAUTHENTICATED" in err or "PERMISSION_DENIED" in err:
-        st.error(
-            f"⚠️ **שגיאת אימות**\n\n"
-            f"המפתח `{api_key[:12]}...` לא מתקבל על ידי גוגל.\n\n"
-            "**פתרון:** כנס ל-aistudio.google.com ← בדוק שהמפתח פעיל ← העתק מחדש ← עדכן Secrets"
-        )
-    elif "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
-        st.error(
-            "⚠️ **מכסת ה-API אזלה (429)**\n\n"
-            "**חינם:** Gmail חדש → aistudio.google.com → מפתח חדש → Secrets → Reboot\n\n"
-            "**קבוע:** billing ב-console.cloud.google.com ($5 = 50,000+ בקשות)"
-        )
-    elif "timeout" in err.lower():
-        st.error("⏱️ **פסק זמן** — נסה שוב.")
-    else:
-        st.error(f"❌ שגיאה: {err}")
+def render_error(err_info: dict, api_key: str):
+    errors    = err_info["errors"]
+    quota_hit = err_info["quota_hit"]
 
-# ════════════════════ TAB 1 — עיון מעמיק ════════════════════════
+    with st.expander("🔍 פרטי שגיאה טכניים (לחץ לצפייה)", expanded=True):
+        for e in errors:
+            st.code(e, language=None)
+
+    if quota_hit:
+        st.markdown(f"""
+        <div class="quota-box">
+        <h4 style="color:#c5a059;margin-top:0;">⚠️ מכסת ה-API אזלה לחשבון זה</h4>
+        <p>המפתח <code>{api_key[:12]}...</code> חרג מהמכסה החינמית של גוגל.</p>
+        <p><b>הפתרון היחיד שעובד תמיד — הפעלת חיוב ($5):</b></p>
+        <ol>
+        <li>כנס ל-<a href="https://console.cloud.google.com/billing" target="_blank">console.cloud.google.com/billing</a></li>
+        <li>לחץ "Link a billing account" או "Create billing account"</li>
+        <li>הוסף כרטיס אשראי</li>
+        <li>קשר את הפרויקט שלך לחשבון החיוב</li>
+        <li>חזור לכאן ונסה שוב</li>
+        </ol>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.error(f"❌ שגיאה: {errors[-1] if errors else 'לא ידועה'}")
+
 with tab_deep:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
         'חיפוש נרחב מ-6 מקורות, תשובה מפורטת עם כל הדעות</p>',
         unsafe_allow_html=True
     )
-    q_deep = st.text_input(
-        "🔮 שאל שאלת עיון או סוגיה:",
-        value=st.session_state.deep_q,
-        key="input_deep"
-    )
+    col_input, col_btn = st.columns([5, 1])
+    with col_input:
+        q_deep = st.text_input(
+            "🔮 שאל שאלת עיון או סוגיה:",
+            value=st.session_state.deep_q,
+            key="input_deep"
+        )
+    with col_btn:
+        st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
+        if st.button("🆕 חדש", key="clear_deep", use_container_width=True,
+                     disabled=not (st.session_state.deep_q or st.session_state.deep_ans)):
+            st.session_state.update({"deep_q": "", "deep_ans": "", "_last_deep": ""})
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
     st.markdown(
         '<div style="color:#7a7a7a;font-size:12px;font-style:italic;">'
         '⚠️ לעניין הלכה למעשה — יש להיוועץ ברב מורה הוראה.</div>',
@@ -409,32 +410,41 @@ with tab_deep:
 
         st.markdown("### ✍️ תשובת ג'מי תורה:")
         ph = st.empty()
-        ph.info("⏳ ג'מי תורה מעיין במקורות... (עד 30 שניות)")
-        try:
-            ans, used_method = call_gemini(api_key, prompt, SYSTEM_DEEP)
-            ph.markdown(f'<div class="answer-box">{ans}</div>', unsafe_allow_html=True)
-            st.caption(f"✅ הופעל: {used_method}")
+        ph.info("⏳ ג'מי תורה מעיין במקורות... (עד 20 שניות)")
+
+        ans, err_info = call_gemini(api_key, prompt, SYSTEM_DEEP)
+        ph.empty()
+
+        if ans:
+            st.markdown(f'<div class="answer-box">{ans}</div>', unsafe_allow_html=True)
             st.session_state.deep_ans = ans
             st.session_state.history  = (
                 [{"q": q_deep.strip(), "a": ans}] + st.session_state.history
             )[:HISTORY_MAX]
             st.balloons()
-        except Exception as e:
-            ph.empty()
-            handle_error(str(e), api_key)
+        else:
+            render_error(err_info, api_key)
 
-# ════════════════════ TAB 2 — בירור מהיר ════════════════════════
 with tab_quick:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
         'חיפוש ממוקד מ-3 מקורות, תשובה קצרה ומהירה</p>',
         unsafe_allow_html=True
     )
-    q_quick = st.text_input(
-        "⚡ שאל שאלה מהירה:",
-        value=st.session_state.quick_q,
-        key="input_quick"
-    )
+    col_input_q, col_btn_q = st.columns([5, 1])
+    with col_input_q:
+        q_quick = st.text_input(
+            "⚡ שאל שאלה מהירה:",
+            value=st.session_state.quick_q,
+            key="input_quick"
+        )
+    with col_btn_q:
+        st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
+        if st.button("🆕 חדש", key="clear_quick", use_container_width=True,
+                     disabled=not (st.session_state.quick_q or st.session_state.quick_ans)):
+            st.session_state.update({"quick_q": "", "quick_ans": "", "_last_quick": ""})
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
     if st.session_state.quick_ans:
         st.markdown(
@@ -455,19 +465,19 @@ with tab_quick:
 
         ph_q = st.empty()
         ph_q.info("⏳ מחפש תשובה...")
-        try:
-            ans_q, used_method_q = call_gemini(api_key, prompt_q, SYSTEM_QUICK)
-            ph_q.markdown(
+
+        ans_q, err_info_q = call_gemini(api_key, prompt_q, SYSTEM_QUICK)
+        ph_q.empty()
+
+        if ans_q:
+            st.markdown(
                 f'<div class="answer-box-quick">{ans_q}</div>',
                 unsafe_allow_html=True
             )
-            st.caption(f"✅ הופעל: {used_method_q}")
             st.session_state.quick_ans = ans_q
-        except Exception as e:
-            ph_q.empty()
-            handle_error(str(e), api_key)
+        else:
+            render_error(err_info_q, api_key)
 
-# ── היסטוריה ─────────────────────────────────────────────────────
 if st.session_state.history:
     st.write("---")
     st.markdown("### 📚 שאלות קודמות:")
@@ -477,3 +487,4 @@ if st.session_state.history:
                 f'<div class="answer-box" style="font-size:14px">{item["a"]}</div>',
                 unsafe_allow_html=True
             )
+            
