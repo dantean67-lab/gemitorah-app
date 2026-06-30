@@ -1,5 +1,6 @@
 import os
 import re
+import html
 import base64
 import requests
 import streamlit as st
@@ -10,7 +11,6 @@ st.set_page_config(
     layout="wide"
 )
 
-VERSION_TAG      = "v2026-06-30-SEFARIA-ONLY"
 SEFARIA_DEEP     = 10
 SEFARIA_QUICK    = 4
 KITZUR_MAX_CHARS = 2000
@@ -88,11 +88,15 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
     color:#4a90d9; font-weight:700; font-size:17px; margin-bottom:10px;
 }
 .kitzur-card-text {
-    color:#c8d8e8; font-size:15px; line-height:2;
+    color:#c8d8e8; font-size:15px; line-height:2; white-space:pre-wrap;
 }
 .no-results {
     background:#1a1410; border:2px solid #c5a059; border-radius:12px;
     padding:24px; text-align:center; color:#c5a059; font-size:16px;
+}
+.sefaria-error {
+    background:#1a0f0f; border:2px solid #8b2020; border-radius:12px;
+    padding:16px 20px; color:#e07070; font-size:14px; direction:ltr;
 }
 #MainMenu,footer,header { visibility:hidden !important; }
 [data-testid="manage-app-button"],[data-testid="stToolbarActions"],
@@ -137,25 +141,34 @@ def _halachic_rank(path: str) -> int:
             return i
     return len(HALACHIC_PATHS)
 
-def search_sefaria(query: str, size: int) -> list:
+def search_sefaria(query: str, size: int) -> tuple:
+    """Returns (results_list, error_str_or_None)."""
     seen, results = set(), []
+    last_error = None
+
     def _fetch(q):
+        nonlocal last_error
+        needed = size - len(results)
+        if needed <= 0:
+            return
         try:
             r = requests.post(
                 SEFARIA_URL,
                 headers={"Content-Type": "application/json"},
-                json={"query": q, "type": "text", "size": size * 3,
+                json={"query": q, "type": "text", "size": needed * 3,
                       "field": "naive_lemmatizer", "slop": 10,
-                      "source_proj": ["heRef", "ref", "path", "he"]},
-                timeout=7
+                      "source_proj": ["heRef", "ref", "path"]},
+                timeout=7,
             )
-            for hit in r.json().get("hits", {}).get("hits", []):
+            r.raise_for_status()
+            for hit in (r.json().get("hits", {}).get("hits") or []):
                 src      = hit.get("_source", {})
                 ref      = src.get("ref") or re.sub(r'\s*\([^)]*\)\s*$', '', hit.get("_id", "")).strip()
-                he_ref   = src.get("heRef") or ref
+                # sanitize heRef — strip any HTML tags before injecting into UI
+                he_ref   = strip_html(src.get("heRef") or ref)
                 path     = src.get("path", "")
                 snippets = hit.get("highlight", {}).get("naive_lemmatizer", [])
-                he       = strip_html(" ... ".join(snippets)) or strip_html(src.get("he", ""))
+                he       = strip_html(" ... ".join(snippets))
                 if ref and he and len(he) > 80 and ref not in seen:
                     seen.add(ref)
                     results.append({
@@ -163,76 +176,112 @@ def search_sefaria(query: str, size: int) -> list:
                         "he":    he[:600] + ("..." if len(he) > 600 else ""),
                         "_rank": _halachic_rank(path),
                     })
-        except Exception:
-            pass
+        except requests.exceptions.Timeout:
+            last_error = "ספריא לא הגיבה בזמן (timeout). נסה שוב."
+        except requests.exceptions.HTTPError as e:
+            last_error = f"ספריא החזירה שגיאה: {e.response.status_code}"
+        except Exception as e:
+            last_error = f"שגיאת חיבור לספריא: {str(e)[:80]}"
+
     _fetch(query)
     kw = clean_query(query)
     if kw and kw != query:
         _fetch(kw)
+
     results.sort(key=lambda x: x["_rank"])
-    return [{k: v for k, v in r.items() if k != "_rank"} for r in results[:size]]
+    return (
+        [{k: v for k, v in r.items() if k != "_rank"} for r in results[:size]],
+        last_error,
+    )
+
+@st.cache_data(show_spinner=False)
+def _load_kitzur_lines():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kitzur_shulchan_aruch.txt")
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read().split("\n")
 
 def search_local_kitzur(query: str) -> list:
     try:
-        if not os.path.exists("kitzur_shulchan_aruch.txt"):
+        lines = _load_kitzur_lines()
+        if not lines:
             return []
-        with open("kitzur_shulchan_aruch.txt", "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.read().split("\n")
         keywords = [w for w in query.split() if len(w) > 2]
         if not keywords:
             return []
-        scored = []
+        scored, covered = [], set()
         for i, line in enumerate(lines):
             score = sum(1 for kw in keywords if kw in line)
             if score > 0:
-                section = "\n".join(lines[max(0, i-1):min(len(lines), i+6)]).strip()
+                window = range(max(0, i - 1), min(len(lines), i + 6))
+                # skip if this window overlaps a higher-scored one already added
+                if any(j in covered for j in window):
+                    continue
+                section = "\n".join(lines[w] for w in window).strip()
                 if len(section) > 20:
-                    scored.append((score, section))
+                    scored.append((score, section[:KITZUR_MAX_CHARS]))
+                    covered.update(window)
         scored.sort(key=lambda x: x[0], reverse=True)
         return [s for _, s in scored[:KITZUR_SECTIONS]]
     except Exception:
         return []
 
-def render_results(query, size):
-    with st.spinner("🔍 מחפש במקורות..."):
-        sources = search_sefaria(query, size)
-        kitzur  = search_local_kitzur(query)
+def render_results(sources: list, kitzur: list, error: str | None = None):
+    if error and not sources and not kitzur:
+        st.markdown(
+            f'<div class="sefaria-error">⚠️ {html.escape(error)}</div>',
+            unsafe_allow_html=True,
+        )
+        return
 
     if not sources and not kitzur:
         st.markdown(
-            '<div class="no-results">לא נמצאו מקורות לשאלה זו. נסה ניסוח אחר.</div>',
-            unsafe_allow_html=True
+            '<div class="no-results">לא נמצאו מקורות. נסה ניסוח אחר.</div>',
+            unsafe_allow_html=True,
         )
         return
+
+    if error:
+        st.warning(f"⚠️ {error} — מציג תוצאות חלקיות.")
 
     if kitzur:
         st.markdown("### 📘 קיצור שולחן ערוך")
         for section in kitzur:
+            # html.escape prevents any HTML/script in the text file from executing
             st.markdown(
                 f'<div class="kitzur-card">'
                 f'<div class="kitzur-card-title">📘 קיצור שולחן ערוך</div>'
-                f'<div class="kitzur-card-text">{section}</div>'
+                f'<div class="kitzur-card-text">{html.escape(section)}</div>'
                 f'</div>',
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
     if sources:
         st.markdown(f"### 📚 מקורות שנמצאו ({len(sources)})")
         for s in sources:
+            # heRef is already strip_html'd; he is strip_html'd in search_sefaria
             st.markdown(
                 f'<div class="source-card">'
-                f'<div class="source-card-title">📖 {s["heRef"]}</div>'
-                f'<div class="source-card-text">{s["he"]}</div>'
+                f'<div class="source-card-title">📖 {html.escape(s["heRef"])}</div>'
+                f'<div class="source-card-text">{html.escape(s["he"])}</div>'
                 f'</div>',
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
 # ── ממשק ─────────────────────────────────────────────────────────
 st.markdown(CSS, unsafe_allow_html=True)
 
-rabbi_base64 = get_base64_image("rabbi.jpeg") or get_base64_image("rabbi.png")
+_rabbi_jpeg = get_base64_image("rabbi.jpeg")
+_rabbi_png  = get_base64_image("rabbi.png")
+if _rabbi_jpeg:
+    rabbi_base64, rabbi_mime = _rabbi_jpeg, "image/jpeg"
+elif _rabbi_png:
+    rabbi_base64, rabbi_mime = _rabbi_png, "image/png"
+else:
+    rabbi_base64, rabbi_mime = None, ""
 img_tag = (
-    f'<img src="data:image/jpeg;base64,{rabbi_base64}" class="rabbi-banner-img" />'
+    f'<img src="data:{rabbi_mime};base64,{rabbi_base64}" class="rabbi-banner-img" />'
     if rabbi_base64 else ''
 )
 st.markdown(f"""
@@ -244,23 +293,29 @@ st.markdown(f"""
   {img_tag}
 </div>""", unsafe_allow_html=True)
 
-for k in ["history", "deep_q", "quick_q", "_last_deep", "_last_quick"]:
+_defaults = {
+    "history": [], "deep_q": "", "quick_q": "",
+    "_last_deep": "", "_last_quick": "",
+    "deep_sources": [], "deep_kitzur": [], "deep_error": None,
+    "quick_sources": [], "quick_kitzur": [], "quick_error": None,
+}
+for k, v in _defaults.items():
     if k not in st.session_state:
-        st.session_state[k] = [] if k == "history" else ""
+        st.session_state[k] = v
 
-st.markdown('<p style="color:#c5a059;font-weight:600;">💡 שאלות לדוגמה:</p>', unsafe_allow_html=True)
-EXAMPLES = [
-    "חשמל בשבת",
-    "כיבוד הורים",
-    "אבילות",
-    "כשרות",
-]
+st.markdown('<p style="color:#c5a059;font-weight:600;">💡 דוגמאות לחיפוש:</p>', unsafe_allow_html=True)
+EXAMPLES = ["חשמל בשבת", "כיבוד הורים", "אבילות", "כשרות"]
 for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
     if col.button(q, key=f"ex_{i}", use_container_width=True):
         st.session_state.update({
             "deep_q": q, "quick_q": q,
             "_last_deep": "", "_last_quick": "",
+            "deep_sources": [], "deep_kitzur": [], "deep_error": None,
+            "quick_sources": [], "quick_kitzur": [], "quick_error": None,
         })
+        for k in ("input_deep", "input_quick"):
+            if k in st.session_state:
+                del st.session_state[k]
         st.rerun()
 
 tab_deep, tab_quick = st.tabs([
@@ -272,14 +327,14 @@ with tab_deep:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
         'חיפוש נרחב — 10 מקורות מספריא + קיצור שולחן ערוך</p>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
     col_input, col_btn = st.columns([5, 1])
     with col_input:
         q_deep = st.text_input(
             "🔍 חפש נושא או מושג (לדוגמה: שבת, כשרות, תפילין) — לא שאלות מלאות:",
             value=st.session_state.deep_q,
-            key="input_deep"
+            key="input_deep",
         )
     with col_btn:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
@@ -288,7 +343,10 @@ with tab_deep:
         if st.button("🆕 חדש", key="clear_deep", use_container_width=True,
                      disabled=not (_has_deep or _has_hist)):
             if _has_deep:
-                st.session_state.update({"deep_q": "", "_last_deep": ""})
+                st.session_state.update({
+                    "deep_q": "", "_last_deep": "",
+                    "deep_sources": [], "deep_kitzur": [], "deep_error": None,
+                })
                 if "input_deep" in st.session_state:
                     del st.session_state["input_deep"]
             else:
@@ -299,38 +357,57 @@ with tab_deep:
     st.markdown(
         '<div style="color:#7a7a7a;font-size:12px;font-style:italic;">'
         '⚠️ לעניין הלכה למעשה — יש להיוועץ ברב מורה הוראה.</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     if q_deep.strip() and q_deep.strip() != st.session_state._last_deep:
         st.session_state._last_deep = q_deep.strip()
         st.session_state.deep_q     = q_deep.strip()
-        st.session_state.history    = (
-            [q_deep.strip()] + st.session_state.history
-        )[:HISTORY_MAX]
-        render_results(q_deep.strip(), SEFARIA_DEEP)
+        hist = st.session_state.history
+        if not hist or hist[0] != q_deep.strip():
+            hist = [q_deep.strip()] + hist
+        st.session_state.history = hist[:HISTORY_MAX]
+        with st.spinner("🔍 מחפש במקורות..."):
+            sources, err = search_sefaria(q_deep.strip(), SEFARIA_DEEP)
+            kitzur       = search_local_kitzur(q_deep.strip())
+        st.session_state.deep_sources = sources
+        st.session_state.deep_kitzur  = kitzur
+        st.session_state.deep_error   = err
+
+    # render cached results — survives tab switches
+    if st.session_state.deep_sources or st.session_state.deep_kitzur or st.session_state.deep_error:
+        render_results(
+            st.session_state.deep_sources,
+            st.session_state.deep_kitzur,
+            st.session_state.deep_error,
+        )
+    elif st.session_state._last_deep:
+        render_results([], [], None)
 
 with tab_quick:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
         'חיפוש ממוקד — 4 מקורות מספריא</p>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
     col_input_q, col_btn_q = st.columns([5, 1])
     with col_input_q:
         q_quick = st.text_input(
             "🔍 חפש נושא או מושג (לדוגמה: שבת, כשרות, תפילין) — לא שאלות מלאות:",
             value=st.session_state.quick_q,
-            key="input_quick"
+            key="input_quick",
         )
     with col_btn_q:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
-        _has_quick = bool(st.session_state.get("input_quick", "") or st.session_state.quick_q)
+        _has_quick  = bool(st.session_state.get("input_quick", "") or st.session_state.quick_q)
         _has_hist_q = bool(st.session_state.history)
         if st.button("🆕 חדש", key="clear_quick", use_container_width=True,
                      disabled=not (_has_quick or _has_hist_q)):
             if _has_quick:
-                st.session_state.update({"quick_q": "", "_last_quick": ""})
+                st.session_state.update({
+                    "quick_q": "", "_last_quick": "",
+                    "quick_sources": [], "quick_kitzur": [], "quick_error": None,
+                })
                 if "input_quick" in st.session_state:
                     del st.session_state["input_quick"]
             else:
@@ -341,10 +418,25 @@ with tab_quick:
     if q_quick.strip() and q_quick.strip() != st.session_state._last_quick:
         st.session_state._last_quick = q_quick.strip()
         st.session_state.quick_q     = q_quick.strip()
-        render_results(q_quick.strip(), SEFARIA_QUICK)
+        with st.spinner("🔍 מחפש במקורות..."):
+            sources_q, err_q = search_sefaria(q_quick.strip(), SEFARIA_QUICK)
+            kitzur_q         = search_local_kitzur(q_quick.strip())
+        st.session_state.quick_sources = sources_q
+        st.session_state.quick_kitzur  = kitzur_q
+        st.session_state.quick_error   = err_q
+
+    if st.session_state.quick_sources or st.session_state.quick_kitzur or st.session_state.quick_error:
+        render_results(
+            st.session_state.quick_sources,
+            st.session_state.quick_kitzur,
+            st.session_state.quick_error,
+        )
+    elif st.session_state._last_quick:
+        render_results([], [], None)
 
 if st.session_state.history:
     st.write("---")
     st.markdown("### 📚 שאלות קודמות:")
     for q in st.session_state.history:
-        st.markdown(f"🔹 {q}")
+        # use st.text to avoid markdown injection from user-supplied query strings
+        st.text(f"🔹 {q}")
