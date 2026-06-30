@@ -286,6 +286,8 @@ with tab_deep:
         if st.button("🆕 חדש", key="clear_deep", use_container_width=True,
                      disabled=not st.session_state.get("input_deep", "")):
             st.session_state.update({"deep_q": "", "_last_deep": ""})
+            if "input_deep" in st.session_state:
+                del st.session_state["input_deep"]
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -321,6 +323,8 @@ with tab_quick:
         if st.button("🆕 חדש", key="clear_quick", use_container_width=True,
                      disabled=not st.session_state.get("input_quick", "")):
             st.session_state.update({"quick_q": "", "_last_quick": ""})
+            if "input_quick" in st.session_state:
+                del st.session_state["input_quick"]
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
