@@ -267,11 +267,6 @@ st.markdown(
 )
 
 api_key = get_api_key()
-key_type = "AQ. (new)" if api_key.startswith("AQ.") else "AIzaSy (classic)" if api_key.startswith("AIza") else "unknown"
-st.markdown(
-    f'<div class="debug-line">🔑 KEY: {api_key[:12]}... | LEN: {len(api_key)} | TYPE: {key_type} | MODELS: {", ".join(MODELS)}</div>',
-    unsafe_allow_html=True
-)
 
 rabbi_base64 = get_base64_image("rabbi.jpeg") or get_base64_image("rabbi.png")
 img_tag = (
