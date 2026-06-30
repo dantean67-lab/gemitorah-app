@@ -131,19 +131,23 @@ def search_sefaria(query: str, size: int) -> list:
     seen, results = set(), []
     def _fetch(q):
         try:
-            r = requests.get(
+            r = requests.post(
                 SEFARIA_URL,
-                params={"query": q, "type": "text", "size": size, "field": "naive_lemmatizer"},
+                headers={"Content-Type": "application/json"},
+                json={"query": q, "type": "text", "size": size,
+                      "field": "naive_lemmatizer", "slop": 10},
                 timeout=7
             )
             for hit in r.json().get("hits", {}).get("hits", []):
-                src = hit.get("_source", {})
-                ref = src.get("ref", "")
-                he  = strip_html(src.get("he", ""))
-                if ref and he and len(he) > 15 and ref not in seen:
-                    seen.add(ref)
+                ref = hit.get("_id", "")
+                # strip edition info like " (Kol Bo 1547 Venice [he])"
+                ref_clean = re.sub(r'\s*\([^)]*\)\s*$', '', ref).strip()
+                snippets  = hit.get("highlight", {}).get("naive_lemmatizer", [])
+                he        = strip_html(" ... ".join(snippets))
+                if ref_clean and he and len(he) > 15 and ref_clean not in seen:
+                    seen.add(ref_clean)
                     results.append({
-                        "heRef": src.get("heRef", ref),
+                        "heRef": ref_clean,
                         "he":    he[:600] + ("..." if len(he) > 600 else "")
                     })
         except Exception:
