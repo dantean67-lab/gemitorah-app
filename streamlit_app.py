@@ -283,11 +283,16 @@ with tab_deep:
         )
     with col_btn:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
+        _has_deep = bool(st.session_state.get("input_deep", "") or st.session_state.deep_q)
+        _has_hist = bool(st.session_state.history)
         if st.button("🆕 חדש", key="clear_deep", use_container_width=True,
-                     disabled=not st.session_state.get("input_deep", "")):
-            st.session_state.update({"deep_q": "", "_last_deep": ""})
-            if "input_deep" in st.session_state:
-                del st.session_state["input_deep"]
+                     disabled=not (_has_deep or _has_hist)):
+            if _has_deep:
+                st.session_state.update({"deep_q": "", "_last_deep": ""})
+                if "input_deep" in st.session_state:
+                    del st.session_state["input_deep"]
+            else:
+                st.session_state.history = []
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -320,11 +325,16 @@ with tab_quick:
         )
     with col_btn_q:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
+        _has_quick = bool(st.session_state.get("input_quick", "") or st.session_state.quick_q)
+        _has_hist_q = bool(st.session_state.history)
         if st.button("🆕 חדש", key="clear_quick", use_container_width=True,
-                     disabled=not st.session_state.get("input_quick", "")):
-            st.session_state.update({"quick_q": "", "_last_quick": ""})
-            if "input_quick" in st.session_state:
-                del st.session_state["input_quick"]
+                     disabled=not (_has_quick or _has_hist_q)):
+            if _has_quick:
+                st.session_state.update({"quick_q": "", "_last_quick": ""})
+                if "input_quick" in st.session_state:
+                    del st.session_state["input_quick"]
+            else:
+                st.session_state.history = []
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
