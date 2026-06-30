@@ -119,7 +119,7 @@ def get_base64_image(path):
     return None
 
 def strip_html(text):
-    return re.sub(r'<[^>]+>', ' ', text).strip()
+    return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', text)).strip()
 
 def clean_query(query):
     return re.sub(
@@ -144,9 +144,9 @@ def search_sefaria(query: str, size: int) -> list:
             r = requests.post(
                 SEFARIA_URL,
                 headers={"Content-Type": "application/json"},
-                json={"query": q, "type": "text", "size": size,
+                json={"query": q, "type": "text", "size": size * 3,
                       "field": "naive_lemmatizer", "slop": 10,
-                      "source_proj": ["heRef", "ref", "path"]},
+                      "source_proj": ["heRef", "ref", "path", "he"]},
                 timeout=7
             )
             for hit in r.json().get("hits", {}).get("hits", []):
@@ -155,8 +155,8 @@ def search_sefaria(query: str, size: int) -> list:
                 he_ref   = src.get("heRef") or ref
                 path     = src.get("path", "")
                 snippets = hit.get("highlight", {}).get("naive_lemmatizer", [])
-                he       = strip_html(" ... ".join(snippets))
-                if ref and he and len(he) > 15 and ref not in seen:
+                he       = strip_html(" ... ".join(snippets)) or strip_html(src.get("he", ""))
+                if ref and he and len(he) > 80 and ref not in seen:
                     seen.add(ref)
                     results.append({
                         "heRef": he_ref,
