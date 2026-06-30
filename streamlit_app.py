@@ -127,6 +127,16 @@ def clean_query(query):
         '', query
     ).strip()
 
+HALACHIC_PATHS = ("Halakhah/Shulchan Arukh", "Halakhah/Mishneh Torah",
+                  "Halakhah/Arukh HaShulchan", "Halakhah/Mishnah Berurah",
+                  "Halakhah/Rishonim", "Halakhah/")
+
+def _halachic_rank(path: str) -> int:
+    for i, prefix in enumerate(HALACHIC_PATHS):
+        if path.startswith(prefix):
+            return i
+    return len(HALACHIC_PATHS)
+
 def search_sefaria(query: str, size: int) -> list:
     seen, results = set(), []
     def _fetch(q):
@@ -135,20 +145,23 @@ def search_sefaria(query: str, size: int) -> list:
                 SEFARIA_URL,
                 headers={"Content-Type": "application/json"},
                 json={"query": q, "type": "text", "size": size,
-                      "field": "naive_lemmatizer", "slop": 10},
+                      "field": "naive_lemmatizer", "slop": 10,
+                      "source_proj": ["heRef", "ref", "path"]},
                 timeout=7
             )
             for hit in r.json().get("hits", {}).get("hits", []):
-                ref = hit.get("_id", "")
-                # strip edition info like " (Kol Bo 1547 Venice [he])"
-                ref_clean = re.sub(r'\s*\([^)]*\)\s*$', '', ref).strip()
-                snippets  = hit.get("highlight", {}).get("naive_lemmatizer", [])
-                he        = strip_html(" ... ".join(snippets))
-                if ref_clean and he and len(he) > 15 and ref_clean not in seen:
-                    seen.add(ref_clean)
+                src      = hit.get("_source", {})
+                ref      = src.get("ref") or re.sub(r'\s*\([^)]*\)\s*$', '', hit.get("_id", "")).strip()
+                he_ref   = src.get("heRef") or ref
+                path     = src.get("path", "")
+                snippets = hit.get("highlight", {}).get("naive_lemmatizer", [])
+                he       = strip_html(" ... ".join(snippets))
+                if ref and he and len(he) > 15 and ref not in seen:
+                    seen.add(ref)
                     results.append({
-                        "heRef": ref_clean,
-                        "he":    he[:600] + ("..." if len(he) > 600 else "")
+                        "heRef": he_ref,
+                        "he":    he[:600] + ("..." if len(he) > 600 else ""),
+                        "_rank": _halachic_rank(path),
                     })
         except Exception:
             pass
@@ -156,7 +169,8 @@ def search_sefaria(query: str, size: int) -> list:
     kw = clean_query(query)
     if kw and kw != query:
         _fetch(kw)
-    return results[:size]
+    results.sort(key=lambda x: x["_rank"])
+    return [{k: v for k, v in r.items() if k != "_rank"} for r in results[:size]]
 
 def search_local_kitzur(query: str) -> list:
     try:
