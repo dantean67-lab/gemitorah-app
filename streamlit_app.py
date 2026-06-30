@@ -217,7 +217,7 @@ def render_results(query, size):
             )
 
     if sources:
-        st.markdown(f"### 📚 {len(sources)} מקורות מספריא")
+        st.markdown(f"### 📚 מקורות שנמצאו ({len(sources)})")
         for s in sources:
             st.markdown(
                 f'<div class="source-card">'
@@ -250,10 +250,10 @@ for k in ["history", "deep_q", "quick_q", "_last_deep", "_last_quick"]:
 
 st.markdown('<p style="color:#c5a059;font-weight:600;">💡 שאלות לדוגמה:</p>', unsafe_allow_html=True)
 EXAMPLES = [
-    "מה הלכות שבת לגבי חשמל?",
-    "מקור מצוות כיבוד אב ואם",
-    "דיני אבילות שבעה",
-    "הלכות כשרות בסיסיות",
+    "חשמל בשבת",
+    "כיבוד הורים",
+    "אבילות",
+    "כשרות",
 ]
 for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
     if col.button(q, key=f"ex_{i}", use_container_width=True):
@@ -277,7 +277,7 @@ with tab_deep:
     col_input, col_btn = st.columns([5, 1])
     with col_input:
         q_deep = st.text_input(
-            "🔮 שאל שאלת עיון או סוגיה:",
+            "🔍 חפש נושא או מושג (לדוגמה: שבת, כשרות, תפילין) — לא שאלות מלאות:",
             value=st.session_state.deep_q,
             key="input_deep"
         )
@@ -312,7 +312,7 @@ with tab_quick:
     col_input_q, col_btn_q = st.columns([5, 1])
     with col_input_q:
         q_quick = st.text_input(
-            "⚡ שאל שאלה מהירה:",
+            "🔍 חפש נושא או מושג (לדוגמה: שבת, כשרות, תפילין) — לא שאלות מלאות:",
             value=st.session_state.quick_q,
             key="input_quick"
         )
