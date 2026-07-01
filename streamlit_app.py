@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 import html
@@ -116,9 +118,11 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
 </script>
 """
 
+@st.cache_data(show_spinner=False)
 def get_base64_image(path):
-    if os.path.exists(path):
-        with open(path, "rb") as f:
+    abs_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+    if os.path.exists(abs_path):
+        with open(abs_path, "rb") as f:
             return base64.b64encode(f.read()).decode()
     return None
 
@@ -141,6 +145,7 @@ def _halachic_rank(path: str) -> int:
             return i
     return len(HALACHIC_PATHS)
 
+@st.cache_data(show_spinner=False, ttl=300)
 def search_sefaria(query: str, size: int) -> tuple:
     """Returns (results_list, error_str_or_None)."""
     seen, results = set(), []
@@ -164,7 +169,6 @@ def search_sefaria(query: str, size: int) -> tuple:
             for hit in (r.json().get("hits", {}).get("hits") or []):
                 src      = hit.get("_source", {})
                 ref      = src.get("ref") or re.sub(r'\s*\([^)]*\)\s*$', '', hit.get("_id", "")).strip()
-                # sanitize heRef — strip any HTML tags before injecting into UI
                 he_ref   = strip_html(src.get("heRef") or ref)
                 path     = src.get("path", "")
                 snippets = hit.get("highlight", {}).get("naive_lemmatizer", [])
@@ -179,7 +183,8 @@ def search_sefaria(query: str, size: int) -> tuple:
         except requests.exceptions.Timeout:
             last_error = "ספריא לא הגיבה בזמן (timeout). נסה שוב."
         except requests.exceptions.HTTPError as e:
-            last_error = f"ספריא החזירה שגיאה: {e.response.status_code}"
+            status = getattr(e.response, "status_code", "?")
+            last_error = f"ספריא החזירה שגיאה: {status}"
         except Exception as e:
             last_error = f"שגיאת חיבור לספריא: {str(e)[:80]}"
 
@@ -189,9 +194,11 @@ def search_sefaria(query: str, size: int) -> tuple:
         _fetch(kw)
 
     results.sort(key=lambda x: x["_rank"])
+    # Suppress the error if we recovered a full result set from the second fetch
+    final_error = last_error if len(results) < size else None
     return (
         [{k: v for k, v in r.items() if k != "_rank"} for r in results[:size]],
-        last_error,
+        final_error,
     )
 
 @st.cache_data(show_spinner=False)
@@ -202,6 +209,7 @@ def _load_kitzur_lines():
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         return f.read().split("\n")
 
+@st.cache_data(show_spinner=False)
 def search_local_kitzur(query: str) -> list:
     try:
         lines = _load_kitzur_lines()
@@ -210,20 +218,26 @@ def search_local_kitzur(query: str) -> list:
         keywords = [w for w in query.split() if len(w) > 2]
         if not keywords:
             return []
-        scored, covered = [], set()
+        # Collect all matches first, then sort by score so high-scored sections
+        # win over overlapping low-scored ones regardless of document position.
+        matches = []
         for i, line in enumerate(lines):
             score = sum(1 for kw in keywords if kw in line)
             if score > 0:
                 window = range(max(0, i - 1), min(len(lines), i + 6))
-                # skip if this window overlaps a higher-scored one already added
-                if any(j in covered for j in window):
-                    continue
                 section = "\n".join(lines[w] for w in window).strip()
                 if len(section) > 20:
-                    scored.append((score, section[:KITZUR_MAX_CHARS]))
-                    covered.update(window)
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [s for _, s in scored[:KITZUR_SECTIONS]]
+                    matches.append((score, i, window, section[:KITZUR_MAX_CHARS]))
+        matches.sort(key=lambda x: x[0], reverse=True)
+        covered, results = set(), []
+        for score, i, window, section in matches:
+            if any(j in covered for j in window):
+                continue
+            results.append(section)
+            covered.update(window)
+            if len(results) >= KITZUR_SECTIONS:
+                break
+        return results
     except Exception:
         return []
 
@@ -243,7 +257,10 @@ def render_results(sources: list, kitzur: list, error: str | None = None):
         return
 
     if error:
-        st.warning(f"⚠️ {error} — מציג תוצאות חלקיות.")
+        st.markdown(
+            f'<div class="sefaria-error" style="margin-bottom:12px">⚠️ {html.escape(error)} — מציג תוצאות חלקיות.</div>',
+            unsafe_allow_html=True,
+        )
 
     if kitzur:
         st.markdown("### 📘 קיצור שולחן ערוך")
@@ -415,9 +432,19 @@ with tab_quick:
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown(
+        '<div style="color:#7a7a7a;font-size:12px;font-style:italic;">'
+        '⚠️ לעניין הלכה למעשה — יש להיוועץ ברב מורה הוראה.</div>',
+        unsafe_allow_html=True,
+    )
+
     if q_quick.strip() and q_quick.strip() != st.session_state._last_quick:
         st.session_state._last_quick = q_quick.strip()
         st.session_state.quick_q     = q_quick.strip()
+        hist = st.session_state.history
+        if not hist or hist[0] != q_quick.strip():
+            hist = [q_quick.strip()] + hist
+        st.session_state.history = hist[:HISTORY_MAX]
         with st.spinner("🔍 מחפש במקורות..."):
             sources_q, err_q = search_sefaria(q_quick.strip(), SEFARIA_QUICK)
             kitzur_q         = search_local_kitzur(q_quick.strip())
