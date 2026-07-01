@@ -13,8 +13,8 @@ st.set_page_config(
     layout="wide"
 )
 
-SEFARIA_DEEP     = 10
-SEFARIA_QUICK    = 4
+SEFARIA_DEEP     = 20
+SEFARIA_QUICK    = 8
 KITZUR_MAX_CHARS = 2000
 KITZUR_SECTIONS  = 5
 HISTORY_MAX      = 5
@@ -229,6 +229,7 @@ _GROQ_SYSTEM_PROMPT = (
     "אל תמספר ואל תעשה רשימה, ואל תפרט מקור אחר מקור — שלב את כל המקורות לכדי הסבר אחד. "
     "ניתן להזכיר שם פוסק בתוך הטקסט אם הדבר מוסיף בהירות, אך לא כמבנה. "
     "התעלם לחלוטין ממקורות שאינם רלוונטיים ישירות לנושא — השתמש רק במקורות שדנים באופן ברור בנושא שנשאל. "
+    "You have been given many sources. Use as many as are relevant. The more sources you cite, the better. "
     "תן תשובה מעמיקה ומפורטת הכוללת: את פסק ההלכה המרכזי ומקורו; מחלוקות בין הפוסקים אם קיימות במקורות "
     "(למשל בין מנהג אשכנז למנהג ספרד); דוגמאות מעשיות כשרלוונטי; ומראי מקום מדויקים כפי שהם מופיעים "
     "במקורות שלפניך (כגון שולחן ערוך אורח חיים, משנה ברורה, בן איש חי וכדומה). "
@@ -283,14 +284,11 @@ def search_sefaria(query: str, size: int) -> tuple:
 
     def _fetch(q):
         nonlocal last_error
-        needed = size - len(results)
-        if needed <= 0:
-            return
         try:
             r = requests.post(
                 SEFARIA_URL,
                 headers={"Content-Type": "application/json"},
-                json={"query": q, "type": "text", "size": needed * 3,
+                json={"query": q, "type": "text", "size": size * 3,
                       "field": "naive_lemmatizer", "slop": 10,
                       "source_proj": ["heRef", "ref", "path"]},
                 timeout=7,
@@ -493,14 +491,14 @@ for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
         st.rerun()
 
 tab_deep, tab_quick = st.tabs([
-    "🏛️   עיון מעמיק — 10 מקורות",
-    "⚡   בירור מהיר — 4 מקורות",
+    f"🏛️   עיון מעמיק — {SEFARIA_DEEP} מקורות",
+    f"⚡   בירור מהיר — {SEFARIA_QUICK} מקורות",
 ])
 
 with tab_deep:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
-        'חיפוש נרחב — 10 מקורות מספריא + קיצור שולחן ערוך</p>',
+        f'חיפוש נרחב — {SEFARIA_DEEP} מקורות מספריא + קיצור שולחן ערוך</p>',
         unsafe_allow_html=True,
     )
     col_input, col_btn = st.columns([5, 1])
@@ -568,7 +566,7 @@ with tab_deep:
 with tab_quick:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
-        'חיפוש ממוקד — 4 מקורות מספריא</p>',
+        f'חיפוש ממוקד — {SEFARIA_QUICK} מקורות מספריא</p>',
         unsafe_allow_html=True,
     )
     col_input_q, col_btn_q = st.columns([5, 1])
