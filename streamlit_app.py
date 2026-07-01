@@ -15,6 +15,7 @@ st.set_page_config(
 
 SEFARIA_DEEP     = 20
 SEFARIA_QUICK    = 8
+SEARCH_EXPANSION_THRESHOLD = 8
 KITZUR_MAX_CHARS = 2000
 KITZUR_SECTIONS  = 5
 HISTORY_MAX      = 5
@@ -177,12 +178,12 @@ def _halachic_rank(path: str) -> int:
 
 def _format_sources_for_groq(sources: list, kitzur: list) -> str:
     parts = []
-    for i, s in enumerate(sources, 1):
-        parts.append(f"[{i}] {s['heRef']}:\n{s['he']}")
     if kitzur:
-        parts.append("\nקיצור שולחן ערוך:")
+        parts.append("מקור ראשי - קיצור שולחן ערוך:")
         for section in kitzur[:3]:
             parts.append(section[:400])
+    for i, s in enumerate(sources, 1):
+        parts.append(f"[{i}] {s['heRef']}:\n{s['he']}")
     return "\n\n".join(parts)
 
 def _groq_client():
@@ -210,36 +211,38 @@ def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> str | 
     except Exception:
         return None
 
-def _retry_if_short(client, query: str, answer: str | None) -> str | None:
-    """If the answer is suspiciously short (<50 words), retry once with a simpler prompt."""
-    if not answer or len(answer.split()) >= 50:
+MIN_ANSWER_WORDS = 150
+
+def _expand_if_short(client, system: str, user: str, answer: str | None) -> str | None:
+    """If the answer is under MIN_ANSWER_WORDS, ask Groq to expand the same answer
+    with more detail rather than re-deriving a new, shorter one."""
+    if not answer or len(answer.split()) >= MIN_ANSWER_WORDS:
         return answer
-    retry = _groq_chat(
+    expanded = _groq_chat(
         client,
-        "אתה רב המסביר תורה בעברית בקצרה, בבהירות ובחום, כמו רב שמלמד תלמיד.",
-        f"ענה בעברית על השאלה התורנית הבאה ב-3-4 משפטים: {query}",
-        max_tokens=300,
+        system,
+        f"{user}\n\nהתשובה הקודמת שכתבת:\n{answer}\n\n"
+        f"התשובה קצרה מדי. הרחב עם יותר פרטים, מקורות ודוגמאות מעשיות.",
+        max_tokens=2000,
     )
-    return retry or answer
+    return expanded or answer
 
-_GROQ_SYSTEM_PROMPT = (
-    "אתה רב מלומד המסביר הלכה בעברית שוטפת וברורה, בסגנון חם, בהיר וחינוכי — "
-    "כמו רב הנותן שיעור תורה מלא ומקיף, לא סיכום קצר. "
-    "קרא את המקורות שלפניך וכתוב תשובה אחת ברורה וזורמת בעברית, בפסקאות רציפות ומגובשות. "
-    "אל תמספר ואל תעשה רשימה, ואל תפרט מקור אחר מקור — שלב את כל המקורות לכדי הסבר אחד. "
-    "ניתן להזכיר שם פוסק בתוך הטקסט אם הדבר מוסיף בהירות, אך לא כמבנה. "
-    "התעלם לחלוטין ממקורות שאינם רלוונטיים ישירות לנושא — השתמש רק במקורות שדנים באופן ברור בנושא שנשאל. "
-    "You have been given many sources. Use as many as are relevant. The more sources you cite, the better. "
-    "תן תשובה מעמיקה ומפורטת הכוללת: את פסק ההלכה המרכזי ומקורו; מחלוקות בין הפוסקים אם קיימות במקורות "
-    "(למשל בין מנהג אשכנז למנהג ספרד); דוגמאות מעשיות כשרלוונטי; ומראי מקום מדויקים כפי שהם מופיעים "
-    "במקורות שלפניך (כגון שולחן ערוך אורח חיים, משנה ברורה, בן איש חי וכדומה). "
-    "סיים בפסקת סיכום מעשי וברור. כתוב לפחות 150 מילה — ענה כמו רב הנותן שיעור מלא, לא סיכום מהיר. "
-    "אל תמציא מידע שאינו במקורות. "
-    "הקפד לסיים את התשובה במלואה — לעולם אל תפסיק באמצע משפט, וודא שהתשובה שלמה ומסתיימת בפסקת סיכום ברורה. "
-    "בסוף כתוב: 'לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.'"
-)
+_GROQ_SYSTEM_PROMPT = """אתה עוזר תורני מומחה ברמת פוסק הלכה.
+תפקידך לענות על שאלות תורניות בצורה מדויקת, מקיפה ומבוססת מקורות.
 
-def ask_groq(query: str, sources: list, kitzur: list) -> str | None:
+כללי תשובה מחייבים:
+א. פתח תמיד בציון המקור העיקרי (שם ספר + פרק/סעיף).
+ב. הבחן בין דעת רוב הפוסקים לדעת מיעוט.
+ג. ציין במפורש: אשכנזים vs ספרדים כשיש הבדל.
+ד. ציין שמות פוסקים מרכזיים (משנה ברורה, בן איש חי, שולחן ערוך הרב, ערוך השולחן).
+ה. סיים תמיד ב"למעשה:" עם הנחיה ברורה ופשוטה.
+ו. אם יש מחלוקת גדולה — כתוב "יש להתייעץ עם רב".
+ז. כתוב בעברית בלבד. פסקאות קצרות וברורות.
+ח. השתמש בכל המקורות שניתנו לך."""
+
+QUICK_INSTRUCTION = "ענה בדיוק ב-5-6 משפטים, כולל דוגמה מעשית אחת. אל תרחיב מעבר לכך."
+
+def ask_groq(query: str, sources: list, kitzur: list, quick: bool = False) -> str | None:
     if not sources and not kitzur:
         return None
     client = _groq_client()
@@ -250,12 +253,15 @@ def ask_groq(query: str, sources: list, kitzur: list) -> str | None:
         f"נושא: {query}\n\n"
         f"השתמש רק במקורות הרלוונטיים ישירות לנושא \"{query}\" — "
         f"התעלם לחלוטין ממקורות העוסקים בנושאים אחרים.\n\n"
-        f"מקורות:\n{blob}"
+        + (f"{QUICK_INSTRUCTION}\n\n" if quick else "")
+        + f"מקורות:\n{blob}"
     )
+    if quick:
+        return _groq_chat(client, _GROQ_SYSTEM_PROMPT, user, max_tokens=500)
     answer = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user, max_tokens=2000)
-    return _retry_if_short(client, query, answer)
+    return _expand_if_short(client, _GROQ_SYSTEM_PROMPT, user, answer)
 
-def ask_groq_general(query: str) -> str | None:
+def ask_groq_general(query: str, quick: bool = False) -> str | None:
     """Fallback: no Sefaria/kitzur results — answer from general Torah knowledge."""
     client = _groq_client()
     if not client:
@@ -273,8 +279,11 @@ def ask_groq_general(query: str) -> str | None:
         "הקפד לסיים את התשובה במלואה — לעולם אל תפסיק באמצע משפט. "
         "בסוף כתוב: 'לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.'"
     )
-    answer = _groq_chat(client, system, f"נושא: {query}", max_tokens=2000)
-    return _retry_if_short(client, query, answer)
+    user = f"נושא: {query}\n\n{QUICK_INSTRUCTION}" if quick else f"נושא: {query}"
+    if quick:
+        return _groq_chat(client, system, user, max_tokens=500)
+    answer = _groq_chat(client, system, user, max_tokens=2000)
+    return _expand_if_short(client, system, user, answer)
 
 @st.cache_data(show_spinner=False, ttl=300)
 def search_sefaria(query: str, size: int) -> tuple:
@@ -322,8 +331,17 @@ def search_sefaria(query: str, size: int) -> tuple:
     if primary != query:
         _fetch(query)
 
+    if len(results) < SEARCH_EXPANSION_THRESHOLD:
+        tried = {primary, query}
+        keywords = [w for w in primary.split() if len(w) > 1 and w not in tried]
+        for w in keywords[:3]:
+            if len(results) >= SEARCH_EXPANSION_THRESHOLD:
+                break
+            tried.add(w)
+            _fetch(w)
+
     results.sort(key=lambda x: x["_rank"])
-    # Suppress the error if we recovered a full result set from the second fetch
+    # Suppress the error if we recovered a full result set from a later fetch
     final_error = last_error if len(results) < size else None
     return (
         [{k: v for k, v in r.items() if k != "_rank"} for r in results[:size]],
@@ -609,9 +627,9 @@ with tab_quick:
         ai_general_q = not sources_q and not kitzur_q and not err_q
         with st.spinner("🤖 מנתח מקורות עם Groq AI..."):
             if ai_general_q:
-                ai_answer_q = ask_groq_general(q_quick.strip())
+                ai_answer_q = ask_groq_general(q_quick.strip(), quick=True)
             else:
-                ai_answer_q = ask_groq(q_quick.strip(), sources_q, kitzur_q)
+                ai_answer_q = ask_groq(q_quick.strip(), sources_q, kitzur_q, quick=True)
         st.session_state.quick_sources     = sources_q
         st.session_state.quick_kitzur      = kitzur_q
         st.session_state.quick_error       = err_q
