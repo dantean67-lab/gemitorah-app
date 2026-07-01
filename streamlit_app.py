@@ -92,6 +92,18 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
 .kitzur-card-text {
     color:#c8d8e8; font-size:15px; line-height:2; white-space:pre-wrap;
 }
+.ai-answer-card {
+    background:linear-gradient(135deg,#071a0d,#0d2614);
+    border:1px solid #2a5c35; border-right:5px solid #4caf72;
+    border-radius:14px; padding:24px 28px; margin-bottom:20px;
+    color:#e0f0e5; direction:rtl; text-align:right;
+}
+.ai-answer-title {
+    color:#4caf72; font-weight:700; font-size:17px; margin-bottom:12px;
+}
+.ai-answer-text {
+    color:#d0ead8; font-size:15px; line-height:2; white-space:pre-wrap;
+}
 .no-results {
     background:#1a1410; border:2px solid #c5a059; border-radius:12px;
     padding:24px; text-align:center; color:#c5a059; font-size:16px;
@@ -144,6 +156,49 @@ def _halachic_rank(path: str) -> int:
         if path.startswith(prefix):
             return i
     return len(HALACHIC_PATHS)
+
+def _format_sources_for_groq(sources: list, kitzur: list) -> str:
+    parts = []
+    for i, s in enumerate(sources, 1):
+        parts.append(f"[{i}] {s['heRef']}:\n{s['he']}")
+    if kitzur:
+        parts.append("\nקיצור שולחן ערוך:")
+        for section in kitzur[:3]:
+            parts.append(section[:400])
+    return "\n\n".join(parts)
+
+def ask_groq(query: str, sources: list, kitzur: list) -> str | None:
+    api_key = st.secrets.get("GROQ_API_KEY", "")
+    if not api_key or (not sources and not kitzur):
+        return None
+    try:
+        from groq import Groq
+        blob = _format_sources_for_groq(sources, kitzur)
+        client = Groq(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "אתה עוזר הלכתי מומחה הבקי בספרות היהודית. "
+                        "קרא את המקורות שלפניך וכתוב תשובה בעברית ברורה ותמציתית לנושא שהועלה. "
+                        "אזכר את שמות המקורות הרלוונטיים. "
+                        "אל תמציא מידע מעבר למה שכתוב במקורות. "
+                        "בסוף כתוב: 'לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.'"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"נושא: {query}\n\nמקורות:\n{blob}",
+                },
+            ],
+            temperature=0.3,
+            max_tokens=1024,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception:
+        return None
 
 @st.cache_data(show_spinner=False, ttl=300)
 def search_sefaria(query: str, size: int) -> tuple:
@@ -241,7 +296,8 @@ def search_local_kitzur(query: str) -> list:
     except Exception:
         return []
 
-def render_results(sources: list, kitzur: list, error: str | None = None):
+def render_results(sources: list, kitzur: list, error: str | None = None,
+                   ai_answer: str | None = None):
     if error and not sources and not kitzur:
         st.markdown(
             f'<div class="sefaria-error">⚠️ {html.escape(error)}</div>',
@@ -255,6 +311,15 @@ def render_results(sources: list, kitzur: list, error: str | None = None):
             unsafe_allow_html=True,
         )
         return
+
+    if ai_answer:
+        st.markdown(
+            f'<div class="ai-answer-card">'
+            f'<div class="ai-answer-title">🤖 תשובה מבוססת מקורות (Groq AI)</div>'
+            f'<div class="ai-answer-text">{html.escape(ai_answer)}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     if error:
         st.markdown(
@@ -313,8 +378,8 @@ st.markdown(f"""
 _defaults = {
     "history": [], "deep_q": "", "quick_q": "",
     "_last_deep": "", "_last_quick": "",
-    "deep_sources": [], "deep_kitzur": [], "deep_error": None,
-    "quick_sources": [], "quick_kitzur": [], "quick_error": None,
+    "deep_sources": [], "deep_kitzur": [], "deep_error": None, "deep_ai_answer": None,
+    "quick_sources": [], "quick_kitzur": [], "quick_error": None, "quick_ai_answer": None,
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -327,8 +392,8 @@ for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
         st.session_state.update({
             "deep_q": q, "quick_q": q,
             "_last_deep": "", "_last_quick": "",
-            "deep_sources": [], "deep_kitzur": [], "deep_error": None,
-            "quick_sources": [], "quick_kitzur": [], "quick_error": None,
+            "deep_sources": [], "deep_kitzur": [], "deep_error": None, "deep_ai_answer": None,
+            "quick_sources": [], "quick_kitzur": [], "quick_error": None, "quick_ai_answer": None,
         })
         for k in ("input_deep", "input_quick"):
             if k in st.session_state:
@@ -362,7 +427,7 @@ with tab_deep:
             if _has_deep:
                 st.session_state.update({
                     "deep_q": "", "_last_deep": "",
-                    "deep_sources": [], "deep_kitzur": [], "deep_error": None,
+                    "deep_sources": [], "deep_kitzur": [], "deep_error": None, "deep_ai_answer": None,
                 })
                 if "input_deep" in st.session_state:
                     del st.session_state["input_deep"]
@@ -387,9 +452,12 @@ with tab_deep:
         with st.spinner("🔍 מחפש במקורות..."):
             sources, err = search_sefaria(q_deep.strip(), SEFARIA_DEEP)
             kitzur       = search_local_kitzur(q_deep.strip())
-        st.session_state.deep_sources = sources
-        st.session_state.deep_kitzur  = kitzur
-        st.session_state.deep_error   = err
+        with st.spinner("🤖 מנתח מקורות עם Groq AI..."):
+            ai_answer = ask_groq(q_deep.strip(), sources, kitzur)
+        st.session_state.deep_sources   = sources
+        st.session_state.deep_kitzur    = kitzur
+        st.session_state.deep_error     = err
+        st.session_state.deep_ai_answer = ai_answer
 
     # render cached results — survives tab switches
     if st.session_state.deep_sources or st.session_state.deep_kitzur or st.session_state.deep_error:
@@ -397,6 +465,7 @@ with tab_deep:
             st.session_state.deep_sources,
             st.session_state.deep_kitzur,
             st.session_state.deep_error,
+            st.session_state.deep_ai_answer,
         )
     elif st.session_state._last_deep:
         render_results([], [], None)
@@ -423,7 +492,7 @@ with tab_quick:
             if _has_quick:
                 st.session_state.update({
                     "quick_q": "", "_last_quick": "",
-                    "quick_sources": [], "quick_kitzur": [], "quick_error": None,
+                    "quick_sources": [], "quick_kitzur": [], "quick_error": None, "quick_ai_answer": None,
                 })
                 if "input_quick" in st.session_state:
                     del st.session_state["input_quick"]
@@ -448,15 +517,19 @@ with tab_quick:
         with st.spinner("🔍 מחפש במקורות..."):
             sources_q, err_q = search_sefaria(q_quick.strip(), SEFARIA_QUICK)
             kitzur_q         = search_local_kitzur(q_quick.strip())
-        st.session_state.quick_sources = sources_q
-        st.session_state.quick_kitzur  = kitzur_q
-        st.session_state.quick_error   = err_q
+        with st.spinner("🤖 מנתח מקורות עם Groq AI..."):
+            ai_answer_q = ask_groq(q_quick.strip(), sources_q, kitzur_q)
+        st.session_state.quick_sources    = sources_q
+        st.session_state.quick_kitzur     = kitzur_q
+        st.session_state.quick_error      = err_q
+        st.session_state.quick_ai_answer  = ai_answer_q
 
     if st.session_state.quick_sources or st.session_state.quick_kitzur or st.session_state.quick_error:
         render_results(
             st.session_state.quick_sources,
             st.session_state.quick_kitzur,
             st.session_state.quick_error,
+            st.session_state.quick_ai_answer,
         )
     elif st.session_state._last_quick:
         render_results([], [], None)
