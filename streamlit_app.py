@@ -112,6 +112,11 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
     background:#1a0f0f; border:2px solid #8b2020; border-radius:12px;
     padding:16px 20px; color:#e07070; font-size:14px; direction:ltr;
 }
+.disclaimer-box {
+    background:#2a1f08; border:2px solid #e0a030; border-radius:12px;
+    padding:16px 22px; margin-bottom:24px; color:#ffcc66;
+    font-size:14px; font-weight:600; text-align:center; line-height:1.6;
+}
 #MainMenu,footer,header { visibility:hidden !important; }
 [data-testid="manage-app-button"],[data-testid="stToolbarActions"],
 [data-testid="stToolbar"],.stDeployButton { display:none !important; }
@@ -141,6 +146,19 @@ def get_base64_image(path):
 def strip_html(text):
     return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', text)).strip()
 
+def strip_markdown(text: str) -> str:
+    """The AI answer is rendered in a plain styled <div>, not st.markdown, so
+    strip any markdown syntax the model added rather than showing raw asterisks/hashes."""
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'__(.+?)__', r'\1', text)
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'\1', text)
+    text = re.sub(r'^\s*[-*•]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+[.)]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\[(\d+)\]', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
 def clean_query(query):
     return re.sub(
         r'\b(מה|האם|כיצד|למה|מדוע|איך|מתי|היכן|מי|הסבר|פרט|ספר)\b',
@@ -167,75 +185,85 @@ def _format_sources_for_groq(sources: list, kitzur: list) -> str:
             parts.append(section[:400])
     return "\n\n".join(parts)
 
-def ask_groq(query: str, sources: list, kitzur: list) -> str | None:
-    api_key = st.secrets.get("GROQ_API_KEY", "")
-    if not api_key or (not sources and not kitzur):
-        return None
-    try:
-        from groq import Groq
-        blob = _format_sources_for_groq(sources, kitzur)
-        client = Groq(api_key=api_key)
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "אתה רב מלומד המסביר הלכה בעברית שוטפת וברורה, בסגנון חם, בהיר וחינוכי. "
-                        "קרא את המקורות שלפניך וכתוב הסבר אחד רציף ומגובש, כאילו אתה מסביר לשואל פנים אל פנים. "
-                        "אל תפרט מקור אחר מקור ואל תשתמש ברשימה ממוספרת — שלב את הרעיונות לתשובה אחת זורמת. "
-                        "ניתן להזכיר שם פוסק בתוך הטקסט אם הדבר מוסיף בהירות, אך לא כמבנה. "
-                        "התעלם ממקורות שאינם רלוונטיים ישירות לנושא — השתמש רק במקורות שדנים באופן ברור בנושא שנשאל. "
-                        "אל תמציא מידע שאינו במקורות. "
-                        "בסוף כתוב: 'לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.'"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"נושא: {query}\n\n"
-                        f"התעלם ממקורות שאינם רלוונטיים ישירות לנושא. "
-                        f"השתמש רק במקורות שדנים באופן ברור ב\"{query}\".\n\n"
-                        f"מקורות:\n{blob}"
-                    ),
-                },
-            ],
-            temperature=0.3,
-            max_tokens=1024,
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception:
-        return None
-
-def ask_groq_general(query: str) -> str | None:
-    """Fallback: no Sefaria/kitzur results — answer from general Torah knowledge."""
+def _groq_client():
     api_key = st.secrets.get("GROQ_API_KEY", "")
     if not api_key:
         return None
     try:
         from groq import Groq
-        client = Groq(api_key=api_key)
+        return Groq(api_key=api_key)
+    except Exception:
+        return None
+
+def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> str | None:
+    try:
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "אתה רב מלומד המסביר תורה בעברית שוטפת וברורה, בסגנון חם, בהיר וחינוכי. "
-                        "לא נמצאו מקורות ספציפיים בספריא עבור השאלה — ענה מתוך ידיעותיך הכלליות בתורה, "
-                        "בפסקה אחת רציפה וזורמת, כאילו אתה מסביר לשואל פנים אל פנים. "
-                        "אל תמציא ציטוטים או מראי מקום מדויקים שאינך בטוח בהם. "
-                        "בסוף כתוב: 'לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.'"
-                    ),
-                },
-                {"role": "user", "content": f"נושא: {query}"},
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
             temperature=0.3,
-            max_tokens=1024,
+            max_tokens=max_tokens,
         )
         return resp.choices[0].message.content.strip()
     except Exception:
         return None
+
+def _retry_if_short(client, query: str, answer: str | None) -> str | None:
+    """If the answer is suspiciously short (<50 words), retry once with a simpler prompt."""
+    if not answer or len(answer.split()) >= 50:
+        return answer
+    retry = _groq_chat(
+        client,
+        "אתה רב המסביר תורה בעברית בקצרה, בבהירות ובחום, כמו רב שמלמד תלמיד.",
+        f"ענה בעברית על השאלה התורנית הבאה ב-3-4 משפטים: {query}",
+        max_tokens=300,
+    )
+    return retry or answer
+
+_GROQ_SYSTEM_PROMPT = (
+    "אתה רב מלומד המסביר הלכה בעברית שוטפת וברורה, בסגנון חם, בהיר וחינוכי — "
+    "כמו רב שמלמד תלמיד פנים אל פנים. "
+    "קרא את המקורות שלפניך וכתוב תשובה אחת ברורה וזורמת בעברית, בפסקה רציפה ומגובשת. "
+    "אל תמספר ואל תעשה רשימה, ואל תפרט מקור אחר מקור — שלב את כל המקורות לכדי הסבר אחד. "
+    "ניתן להזכיר שם פוסק בתוך הטקסט אם הדבר מוסיף בהירות, אך לא כמבנה. "
+    "התעלם לחלוטין ממקורות שאינם רלוונטיים ישירות לנושא — השתמש רק במקורות שדנים באופן ברור בנושא שנשאל. "
+    "אל תמציא מידע שאינו במקורות. "
+    "בסוף כתוב: 'לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.'"
+)
+
+def ask_groq(query: str, sources: list, kitzur: list) -> str | None:
+    if not sources and not kitzur:
+        return None
+    client = _groq_client()
+    if not client:
+        return None
+    blob = _format_sources_for_groq(sources, kitzur)
+    user = (
+        f"נושא: {query}\n\n"
+        f"השתמש רק במקורות הרלוונטיים ישירות לנושא \"{query}\" — "
+        f"התעלם לחלוטין ממקורות העוסקים בנושאים אחרים.\n\n"
+        f"מקורות:\n{blob}"
+    )
+    answer = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user)
+    return _retry_if_short(client, query, answer)
+
+def ask_groq_general(query: str) -> str | None:
+    """Fallback: no Sefaria/kitzur results — answer from general Torah knowledge."""
+    client = _groq_client()
+    if not client:
+        return None
+    system = (
+        "אתה רב מלומד המסביר תורה בעברית שוטפת וברורה, בסגנון חם, בהיר וחינוכי. "
+        "לא נמצאו מקורות ספציפיים בספריא עבור השאלה — ענה מתוך ידיעותיך הכלליות בתורה, "
+        "בפסקה אחת רציפה וזורמת, כאילו אתה מסביר לשואל פנים אל פנים. "
+        "אל תמספר ואל תעשה רשימה. "
+        "אל תמציא ציטוטים או מראי מקום מדויקים שאינך בטוח בהם. "
+        "בסוף כתוב: 'לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.'"
+    )
+    answer = _groq_chat(client, system, f"נושא: {query}")
+    return _retry_if_short(client, query, answer)
 
 @st.cache_data(show_spinner=False, ttl=300)
 def search_sefaria(query: str, size: int) -> tuple:
@@ -359,7 +387,7 @@ def render_results(sources: list, kitzur: list, error: str | None = None,
         st.markdown(
             f'<div class="ai-answer-card">'
             f'<div class="ai-answer-title">{title}</div>'
-            f'<div class="ai-answer-text">{html.escape(ai_answer)}</div>'
+            f'<div class="ai-answer-text">{html.escape(strip_markdown(ai_answer))}</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -418,9 +446,16 @@ st.markdown(f"""
   {img_tag}
 </div>""", unsafe_allow_html=True)
 
+st.markdown(
+    '<div class="disclaimer-box">⚠️ ג\'מי תורה הוא כלי עזר ללימוד בלבד ועלול לטעות. '
+    'לכל שאלה הלכתית חובה להתייעץ עם רב מוסמך.</div>',
+    unsafe_allow_html=True,
+)
+
 _defaults = {
     "history": [], "deep_q": "", "quick_q": "",
     "_last_deep": "", "_last_quick": "",
+    "deep_input_v": 0, "quick_input_v": 0,
     "deep_sources": [], "deep_kitzur": [], "deep_error": None,
     "deep_ai_answer": None, "deep_ai_general": False,
     "quick_sources": [], "quick_kitzur": [], "quick_error": None,
@@ -442,9 +477,9 @@ for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
             "quick_sources": [], "quick_kitzur": [], "quick_error": None,
             "quick_ai_answer": None, "quick_ai_general": False,
         })
-        for k in ("input_deep", "input_quick"):
-            if k in st.session_state:
-                del st.session_state[k]
+        # bump the widget key version to force the text_input to remount with the new value
+        st.session_state.deep_input_v  += 1
+        st.session_state.quick_input_v += 1
         st.rerun()
 
 tab_deep, tab_quick = st.tabs([
@@ -459,15 +494,16 @@ with tab_deep:
         unsafe_allow_html=True,
     )
     col_input, col_btn = st.columns([5, 1])
+    _deep_key = f"input_deep_{st.session_state.deep_input_v}"
     with col_input:
         q_deep = st.text_input(
             "🔍 חפש נושא או מושג (לדוגמה: שבת, כשרות, תפילין) — לא שאלות מלאות:",
             value=st.session_state.deep_q,
-            key="input_deep",
+            key=_deep_key,
         )
     with col_btn:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
-        _has_deep = bool(st.session_state.get("input_deep", "") or st.session_state.deep_q)
+        _has_deep = bool(st.session_state.get(_deep_key, "") or st.session_state.deep_q)
         _has_hist = bool(st.session_state.history)
         if st.button("🆕 חדש", key="clear_deep", use_container_width=True,
                      disabled=not (_has_deep or _has_hist)):
@@ -477,18 +513,12 @@ with tab_deep:
                     "deep_sources": [], "deep_kitzur": [], "deep_error": None,
                     "deep_ai_answer": None, "deep_ai_general": False,
                 })
-                if "input_deep" in st.session_state:
-                    del st.session_state["input_deep"]
+                # bump the widget key version to force the text_input to remount empty
+                st.session_state.deep_input_v += 1
             else:
                 st.session_state.history = []
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown(
-        '<div style="color:#7a7a7a;font-size:12px;font-style:italic;">'
-        '⚠️ לעניין הלכה למעשה — יש להיוועץ ברב מורה הוראה.</div>',
-        unsafe_allow_html=True,
-    )
 
     if q_deep.strip() and q_deep.strip() != st.session_state._last_deep:
         st.session_state._last_deep = q_deep.strip()
@@ -532,15 +562,16 @@ with tab_quick:
         unsafe_allow_html=True,
     )
     col_input_q, col_btn_q = st.columns([5, 1])
+    _quick_key = f"input_quick_{st.session_state.quick_input_v}"
     with col_input_q:
         q_quick = st.text_input(
             "🔍 חפש נושא או מושג (לדוגמה: שבת, כשרות, תפילין) — לא שאלות מלאות:",
             value=st.session_state.quick_q,
-            key="input_quick",
+            key=_quick_key,
         )
     with col_btn_q:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
-        _has_quick  = bool(st.session_state.get("input_quick", "") or st.session_state.quick_q)
+        _has_quick  = bool(st.session_state.get(_quick_key, "") or st.session_state.quick_q)
         _has_hist_q = bool(st.session_state.history)
         if st.button("🆕 חדש", key="clear_quick", use_container_width=True,
                      disabled=not (_has_quick or _has_hist_q)):
@@ -550,18 +581,12 @@ with tab_quick:
                     "quick_sources": [], "quick_kitzur": [], "quick_error": None,
                     "quick_ai_answer": None, "quick_ai_general": False,
                 })
-                if "input_quick" in st.session_state:
-                    del st.session_state["input_quick"]
+                # bump the widget key version to force the text_input to remount empty
+                st.session_state.quick_input_v += 1
             else:
                 st.session_state.history = []
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown(
-        '<div style="color:#7a7a7a;font-size:12px;font-style:italic;">'
-        '⚠️ לעניין הלכה למעשה — יש להיוועץ ברב מורה הוראה.</div>',
-        unsafe_allow_html=True,
-    )
 
     if q_quick.strip() and q_quick.strip() != st.session_state._last_quick:
         st.session_state._last_quick = q_quick.strip()
