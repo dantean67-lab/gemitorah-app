@@ -13,13 +13,55 @@ st.set_page_config(
     layout="wide"
 )
 
-SEFARIA_DEEP     = 100
-SEFARIA_QUICK    = 30
+# ── Sefaria search ──────────────────────────────────────────────────
+SEFARIA_DEEP               = 100
+SEFARIA_QUICK              = 30
+SEFARIA_TIMEOUT_SECONDS    = 7
+SEFARIA_MIN_SNIPPET_CHARS  = 100
 SEARCH_EXPANSION_THRESHOLD = 8
+SEFARIA_URL                = "https://www.sefaria.org/api/search-wrapper"
+
+# ── Kitzur Shulchan Arukh (local file, shown in full in the UI) ────
 KITZUR_MAX_CHARS = 2000
 KITZUR_SECTIONS  = 5
-HISTORY_MAX      = 5
-SEFARIA_URL      = "https://www.sefaria.org/api/search-wrapper"
+
+# ── Groq — source trimming (the UI shows every source found, but only
+# a hard-trimmed top slice is ever sent to Groq, to stay well under its
+# free-tier daily token budget) ─────────────────────────────────────
+GROQ_DEEP_SOURCES           = 6
+GROQ_QUICK_SOURCES          = 3
+GROQ_SOURCE_MAX_CHARS       = 120   # per source, deep tab
+GROQ_QUICK_SOURCE_MAX_CHARS = 100   # per source, quick tab
+GROQ_KITZUR_SOURCES         = 2
+GROQ_KITZUR_MAX_CHARS       = 200
+GROQ_BUDGET_CHARS           = 3000  # hard safety net on the assembled prompt (~4 chars/token)
+
+# ── Groq — response length & sampling ───────────────────────────────
+GROQ_DEEP_MAX_TOKENS     = 800
+GROQ_QUICK_MAX_TOKENS    = 300
+GROQ_GENERAL_MAX_TOKENS  = 600
+GROQ_SOURCE_TEMPERATURE  = 0.2
+GROQ_GENERAL_TEMPERATURE = 0.4
+GROQ_TIMEOUT_SECONDS     = 30
+GROQ_CACHE_TTL_SECONDS   = 3600
+
+# ── Groq — answer completeness (deep tab retries once; quick tab never does) ─
+MIN_ANSWER_WORDS_DEEP  = 80
+MIN_ANSWER_WORDS_QUICK = 30
+
+# ── Groq — rough session-scoped usage estimate (not a persisted daily
+# counter — Streamlit session_state doesn't survive across sessions/days,
+# so this is a "how much have I used this session" indicator, not a
+# true quota tracker) ───────────────────────────────────────────────
+GROQ_DAILY_TOKEN_LIMIT           = 100_000
+GROQ_EST_TOKENS_PER_SOURCE_CALL  = 500
+GROQ_EST_TOKENS_PER_GENERAL_CALL = 800
+GROQ_TOKEN_WARNING_RATIO         = 0.8
+
+# ── UI ───────────────────────────────────────────────────────────────
+HISTORY_MAX             = 5
+VISIBLE_SOURCES_DEFAULT = 5
+MAX_QUERY_CHARS         = 200
 
 CSS = """
 <style>
@@ -57,6 +99,12 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
     .premium-header h1 { font-size:2rem !important; text-align:center !important; white-space:normal !important; }
     .premium-header p  { text-align:center !important; }
     .rabbi-banner-img  { width:130px !important; }
+    .stTabs [data-baseweb="tab-list"] {
+        overflow-x:auto !important; flex-wrap:nowrap !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        font-size:12px !important; padding:8px 10px !important; white-space:nowrap !important;
+    }
 }
 .stTextInput > div > div > input {
     direction:rtl !important; text-align:right !important;
@@ -137,14 +185,16 @@ body,p,div,h1,h2,h3,h4,h5,h6,li,span,input,label,textarea,
 """
 
 @st.cache_data(show_spinner=False)
-def get_base64_image(path):
+def get_base64_image(path: str) -> str | None:
+    """Base64-encode a local image file for inlining into an <img> tag."""
     abs_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
     if os.path.exists(abs_path):
         with open(abs_path, "rb") as f:
             return base64.b64encode(f.read()).decode()
     return None
 
-def strip_html(text):
+def strip_html(text: str) -> str:
+    """Strip HTML tags and collapse whitespace — used on both Sefaria snippets and user input."""
     return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', text)).strip()
 
 def strip_markdown(text: str) -> str:
@@ -160,54 +210,130 @@ def strip_markdown(text: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-def clean_query(query):
+def clean_query(query: str) -> str:
+    """Strip common Hebrew question words so the Sefaria search gets a bare topic/keyword."""
     return re.sub(
         r'\b(מה|האם|כיצד|למה|מדוע|איך|מתי|היכן|מי|הסבר|פרט|ספר)\b',
         '', query
     ).strip()
+
+def sanitize_query(raw: str) -> str:
+    """Input-boundary hardening: strip any HTML/script tags and cap length before use."""
+    return strip_html(raw)[:MAX_QUERY_CHARS]
 
 HALACHIC_PATHS = ("Halakhah/Shulchan Arukh", "Halakhah/Mishneh Torah",
                   "Halakhah/Arukh HaShulchan", "Halakhah/Mishnah Berurah",
                   "Halakhah/Rishonim", "Halakhah/")
 
 def _halachic_rank(path: str) -> int:
+    """Ordinal rank used as a tie-breaker: more specific/authoritative halachic works rank lower."""
     for i, prefix in enumerate(HALACHIC_PATHS):
         if path.startswith(prefix):
             return i
     return len(HALACHIC_PATHS)
 
-# Sources are shown in full in the UI, but only the top few (already sorted by
-# halachic relevance) are sent to Groq, trimmed hard, to stay under its token limit.
-GROQ_SOURCE_TRIM_CHARS  = 150
-GROQ_TOP_SOURCES_DEEP   = 8
-GROQ_TOP_SOURCES_QUICK  = 4
-GROQ_TOP_KITZUR_DEEP    = 3
-GROQ_TOP_KITZUR_QUICK   = 2
+PREFERRED_PATH_PREFIXES     = ("Halakhah/", "Responsa/", "Mishnah/", "Talmud/")
+DEPRIORITIZED_PATH_PREFIXES = ("Liturgy/", "Poetry/", "Philosophy/")
 
-GROQ_RATE_LIMIT_MSG = (
-    "⏳ מכסת Groq היומית אזלה. נסה שוב בעוד כמה שעות.\n"
-    "המקורות מוצגים למטה לעיונך."
-)
+def _relevance_score(result: dict, query_words: list) -> int:
+    """Score a Sefaria hit for topical relevance so unrelated matches (e.g. tzaraat
+    texts matching a כשרות root-word search) sink instead of crowding out real hits."""
+    he_ref = result["heRef"]
+    he_head = result["he"][:100]
+    path = result["_path"]
+    score, matched_words = 0, 0
+    for w in query_words:
+        matched = False
+        if w in he_ref:
+            score += 3
+            matched = True
+        if w in he_head:
+            score += 2
+            matched = True
+        if matched:
+            matched_words += 1
+    if path.startswith(PREFERRED_PATH_PREFIXES):
+        score += 1
+    if "Aggadah" in path:
+        score -= 2
+    elif path.startswith(DEPRIORITIZED_PATH_PREFIXES):
+        score -= 1
+    if len(query_words) > 1 and matched_words >= 2:
+        score += 2
+    return score
+
+def trim_to_token_budget(sources: list, budget_chars: int = GROQ_BUDGET_CHARS) -> list:
+    """Safety net beyond the fixed per-tab source counts: drop trailing sources
+    once their combined length would exceed budget_chars (~budget_chars/4 tokens)."""
+    kept, total = [], 0
+    for s in sources:
+        length = len(s.get("he", "")) + len(s.get("heRef", ""))
+        if total + length > budget_chars:
+            break
+        kept.append(s)
+        total += length
+    return kept
 
 def _format_sources_for_groq(sources: list, kitzur: list, quick: bool = False) -> str:
-    top_sources = GROQ_TOP_SOURCES_QUICK if quick else GROQ_TOP_SOURCES_DEEP
-    top_kitzur  = GROQ_TOP_KITZUR_QUICK if quick else GROQ_TOP_KITZUR_DEEP
+    """Build the Groq prompt's source blob from only the top few, hard-trimmed, sources."""
+    n = GROQ_QUICK_SOURCES if quick else GROQ_DEEP_SOURCES
+    char_limit = GROQ_QUICK_SOURCE_MAX_CHARS if quick else GROQ_SOURCE_MAX_CHARS
+    picked = [
+        {"heRef": s["heRef"], "he": s["he"][:char_limit]}
+        for s in sources[:n]
+    ]
+    picked = trim_to_token_budget(picked, GROQ_BUDGET_CHARS)
     parts = []
     if kitzur:
         parts.append("מקור ראשי - קיצור שולחן ערוך:")
-        for section in kitzur[:top_kitzur]:
-            parts.append(section[:GROQ_SOURCE_TRIM_CHARS])
-    for i, s in enumerate(sources[:top_sources], 1):
-        parts.append(f"[{i}] {s['heRef']}:\n{s['he'][:GROQ_SOURCE_TRIM_CHARS]}")
+        for section in kitzur[:GROQ_KITZUR_SOURCES]:
+            parts.append(section[:GROQ_KITZUR_MAX_CHARS])
+    for i, s in enumerate(picked, 1):
+        parts.append(f"[{i}] {s['heRef']}:\n{s['he']}")
     return "\n\n".join(parts)
 
 def _is_rate_limit_error(e: Exception) -> bool:
+    """True if the Groq exception represents an HTTP 429 rate-limit response."""
     if getattr(e, "status_code", None) == 429:
         return True
     if type(e).__name__ == "RateLimitError":
         return True
     msg = str(e).lower()
     return "429" in msg or "rate_limit" in msg or "rate limit" in msg
+
+GROQ_RATE_LIMIT_FALLBACK_MSG = (
+    "⏳ מכסת Groq היומית אזלה. נסה שוב בעוד כמה שעות.\n"
+    "המקורות למטה זמינים לעיונך גם ללא תשובת AI."
+)
+
+def _format_rate_limit_message(e: Exception) -> str:
+    """Best-effort: pull the wait duration out of Groq's 429 (header or message text)
+    and phrase it in Hebrew; falls back to a generic message if it can't be parsed."""
+    total_seconds = None
+    resp = getattr(e, "response", None)
+    if resp is not None:
+        try:
+            retry_after = resp.headers.get("retry-after")
+            if retry_after:
+                total_seconds = float(retry_after)
+        except Exception:
+            total_seconds = None
+    if total_seconds is None:
+        m = re.search(r'try again in\s+(?:([\d.]+)h)?\s*(?:([\d.]+)m)?\s*(?:([\d.]+)s)?',
+                       str(e), re.IGNORECASE)
+        if m and any(m.groups()):
+            h, mnt, s = (float(g) if g else 0.0 for g in m.groups())
+            total_seconds = h * 3600 + mnt * 60 + s
+    if total_seconds is None:
+        return GROQ_RATE_LIMIT_FALLBACK_MSG
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    if hours == 0 and minutes == 0:
+        minutes = 1
+    return (
+        f"⏳ מכסת Groq אזלה. תחזור בעוד {hours} שעות ו-{minutes} דקות.\n"
+        "המקורות למטה זמינים לעיונך גם ללא תשובת AI."
+    )
 
 def _groq_client():
     """Returns (client_or_None, error_or_None)."""
@@ -216,13 +342,14 @@ def _groq_client():
         return None, "⚠️ שגיאת Groq: מפתח GROQ_API_KEY לא הוגדר בהגדרות."
     try:
         from groq import Groq
-        return Groq(api_key=api_key), None
+        return Groq(api_key=api_key, timeout=GROQ_TIMEOUT_SECONDS), None
     except Exception as e:
         print(f"Groq client init error: {e}")
         return None, f"⚠️ שגיאת Groq: שגיאת אתחול ({e})."
 
-def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> tuple:
-    """Returns (content_or_None, error_or_None)."""
+def _groq_chat(client, system: str, user: str, max_tokens: int = 1024,
+               temperature: float = 0.3) -> tuple:
+    """Single Groq chat completion call. Returns (content_or_None, error_or_None)."""
     try:
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -230,54 +357,73 @@ def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> tuple:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            temperature=0.3,
+            temperature=temperature,
             max_tokens=max_tokens,
         )
         return resp.choices[0].message.content.strip(), None
     except Exception as e:
         print(f"Groq chat error: {e}")
         if _is_rate_limit_error(e):
-            return None, GROQ_RATE_LIMIT_MSG
+            return None, _format_rate_limit_message(e)
         return None, f"⚠️ שגיאת Groq: {e}"
 
-MIN_ANSWER_WORDS = 150
+_SENTENCE_END_CHARS = (".", "!", "?", ":", "״")
 
-def _expand_if_short(client, system: str, user: str, answer: str | None) -> str | None:
-    """If the answer is under MIN_ANSWER_WORDS, ask Groq to expand the same answer
-    with more detail rather than re-deriving a new, shorter one."""
-    if not answer or len(answer.split()) >= MIN_ANSWER_WORDS:
+def _looks_complete(answer: str | None, min_words: int) -> bool:
+    """Cheap signal that Groq finished its thought rather than getting cut off."""
+    if not answer:
+        return False
+    if len(answer.split()) < min_words:
+        return False
+    return answer.rstrip().endswith(_SENTENCE_END_CHARS)
+
+def _complete_if_needed(client, system: str, user: str, answer: str | None,
+                        min_words: int, max_tokens: int, temperature: float) -> str | None:
+    """Deep-tab only: a single retry asking Groq to finish an incomplete/short answer."""
+    if not answer or _looks_complete(answer, min_words):
         return answer
-    expanded, _err = _groq_chat(
-        client,
-        system,
-        f"{user}\n\nהתשובה הקודמת שכתבת:\n{answer}\n\n"
-        f"התשובה קצרה מדי. הרחב עם יותר פרטים, מקורות ודוגמאות מעשיות.",
-        max_tokens=2000,
-    )
-    return expanded or answer
+    with st.spinner("✍️ מנסח תשובה..."):
+        continued, _err = _groq_chat(
+            client, system,
+            f"{user}\n\nהתשובה הקודמת שכתבת (לא הושלמה):\n{answer}\n\n"
+            f"התשובה לא הושלמה. המשך מהמקום שעצרת ותסיים במשפט שלם.",
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+    return continued or answer
 
-_GROQ_SYSTEM_PROMPT = """אתה עוזר תורני מומחה ברמת פוסק הלכה.
-תפקידך לענות על שאלות תורניות בצורה מדויקת, מקיפה ומבוססת מקורות.
+_GROQ_SYSTEM_PROMPT = """אתה גמי תורה — עוזר תורני מומחה ברמת פוסק הלכה, המשיב בעברית שוטפת וברורה.
 
 כללי תשובה מחייבים:
-א. פתח תמיד בציון המקור העיקרי (שם ספר + פרק/סעיף).
+א. פתח בציון המקור העיקרי (שם ספר בלבד, ללא ציטוט ישיר).
 ב. הבחן בין דעת רוב הפוסקים לדעת מיעוט.
-ג. ציין במפורש: אשכנזים vs ספרדים כשיש הבדל.
-ד. ציין שמות פוסקים מרכזיים (משנה ברורה, בן איש חי, שולחן ערוך הרב, ערוך השולחן).
-ה. סיים תמיד ב"למעשה:" עם הנחיה ברורה ופשוטה.
-ו. אם יש מחלוקת גדולה — כתוב "יש להתייעץ עם רב".
-ז. כתוב בעברית בלבד. פסקאות קצרות וברורות.
-ח. השתמש בכל המקורות שניתנו לך."""
+ג. ציין הבדלי מנהג אשכנזים/ספרדים רק כשברור שיש.
+ד. הזכר שמות פוסקים מוכרים: משנה ברורה, בן איש חי, שולחן ערוך הרב, ערוך השולחן.
+ה. סיים תמיד ב"למעשה:" עם הנחיה מעשית ברורה וקצרה.
+ו. אם יש מחלוקת גדולה בין הפוסקים — ציין זאת ואמור "יש להתייעץ עם רב".
+ז. כתוב בפסקאות זורמות — לא רשימות ממוספרות.
+ח. אל תמציא מקורות — השתמש רק במה שניתן לך.
+ט. אל תפסיק באמצע משפט — סיים תמיד תשובה שלמה.
+י. בסוף כתוב תמיד: "לעניין הלכה למעשה יש להיוועץ עם רב מורה הוראה."""
 
-QUICK_INSTRUCTION = "ענה בדיוק ב-5-6 משפטים, כולל דוגמה מעשית אחת. אל תרחיב מעבר לכך."
+QUICK_INSTRUCTION = (
+    f"ענה בדיוק ב-5-6 משפטים (לפחות {MIN_ANSWER_WORDS_QUICK} מילים), "
+    f"כולל דוגמה מעשית אחת. אל תרחיב מעבר לכך."
+)
 
-def ask_groq(query: str, sources: list, kitzur: list, quick: bool = False) -> tuple:
-    """Returns (answer_or_None, error_or_None)."""
-    if not sources and not kitzur:
-        return None, None
+class _GroqCallFailed(Exception):
+    """Raised so st.cache_data never caches a failed Groq call (only successes are cached)."""
+
+def _track_groq_tokens(estimate: int) -> None:
+    """Bump the session-scoped usage estimate — only called on a real cache-miss API call."""
+    st.session_state.groq_tokens_used = st.session_state.get("groq_tokens_used", 0) + estimate
+
+@st.cache_data(show_spinner=False, ttl=GROQ_CACHE_TTL_SECONDS)
+def _ask_groq_cached(query: str, sources: list, kitzur: list, quick: bool) -> str:
+    """Cached core of ask_groq; raises _GroqCallFailed (never cached) on any Groq error."""
     client, err = _groq_client()
     if not client:
-        return None, err
+        raise _GroqCallFailed(err)
     blob = _format_sources_for_groq(sources, kitzur, quick)
     user = (
         f"נושא: {query}\n\n"
@@ -287,44 +433,86 @@ def ask_groq(query: str, sources: list, kitzur: list, quick: bool = False) -> tu
         + f"מקורות:\n{blob}"
     )
     if quick:
-        answer, err = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user, max_tokens=500)
-        return answer, err
-    answer, err = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user, max_tokens=2000)
-    return _expand_if_short(client, _GROQ_SYSTEM_PROMPT, user, answer), err
+        answer, err = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user,
+                                  max_tokens=GROQ_QUICK_MAX_TOKENS,
+                                  temperature=GROQ_SOURCE_TEMPERATURE)
+        if err:
+            raise _GroqCallFailed(err)
+        _track_groq_tokens(GROQ_EST_TOKENS_PER_SOURCE_CALL)
+        return answer
+    answer, err = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user,
+                              max_tokens=GROQ_DEEP_MAX_TOKENS,
+                              temperature=GROQ_SOURCE_TEMPERATURE)
+    if err:
+        raise _GroqCallFailed(err)
+    answer = _complete_if_needed(client, _GROQ_SYSTEM_PROMPT, user, answer,
+                                  MIN_ANSWER_WORDS_DEEP, GROQ_DEEP_MAX_TOKENS,
+                                  GROQ_SOURCE_TEMPERATURE)
+    _track_groq_tokens(GROQ_EST_TOKENS_PER_SOURCE_CALL)
+    return answer
+
+def ask_groq(query: str, sources: list, kitzur: list, quick: bool = False) -> tuple:
+    """Ask Groq to answer using the given Sefaria/kitzur sources. Returns (answer, error)."""
+    if not sources and not kitzur:
+        return None, None
+    try:
+        return _ask_groq_cached(query, sources, kitzur, quick), None
+    except _GroqCallFailed as e:
+        return None, str(e)
+
+_GROQ_GENERAL_SYSTEM_PROMPT = (
+    "אתה גמי תורה — רב מלומד המסביר תורה בעברית שוטפת, ברורה ומדויקת. "
+    "לא נמצאו מקורות ספציפיים בספריא עבור השאלה — ענה מתוך ידיעותיך הכלליות בתורה. "
+    "ציין באילו ספרי הלכה מרכזיים (שולחן ערוך, משנה ברורה, משנה תורה וכדומה) הנושא נדון, "
+    "מבלי לצטט סימן/סעיף מדויק אם אינך בטוח בו. "
+    "היה ספציפי לגבי דעת רוב הפוסקים, וציין הבדלי מנהג אשכנז/ספרד רק כשברור שיש. "
+    "כתוב בפסקאות זורמות, לא רשימות ממוספרות, באורך של כ-150–200 מילים. "
+    "סיים בפסקת סיכום מעשי קצרה תחת הכותרת \"למעשה:\". "
+    "אל תפסיק באמצע משפט — סיים תמיד תשובה שלמה. "
+    "בסוף כתוב תמיד: 'לעניין הלכה למעשה יש להיוועץ עם רב מורה הוראה.'"
+)
+
+@st.cache_data(show_spinner=False, ttl=GROQ_CACHE_TTL_SECONDS)
+def _ask_groq_general_cached(query: str, quick: bool) -> str:
+    """Cached core of ask_groq_general; raises _GroqCallFailed (never cached) on error."""
+    client, err = _groq_client()
+    if not client:
+        raise _GroqCallFailed(err)
+    user = f"נושא: {query}\n\n{QUICK_INSTRUCTION}" if quick else f"נושא: {query}"
+    if quick:
+        answer, err = _groq_chat(client, _GROQ_GENERAL_SYSTEM_PROMPT, user,
+                                  max_tokens=GROQ_QUICK_MAX_TOKENS,
+                                  temperature=GROQ_GENERAL_TEMPERATURE)
+        if err:
+            raise _GroqCallFailed(err)
+        _track_groq_tokens(GROQ_EST_TOKENS_PER_GENERAL_CALL)
+        return answer
+    answer, err = _groq_chat(client, _GROQ_GENERAL_SYSTEM_PROMPT, user,
+                              max_tokens=GROQ_GENERAL_MAX_TOKENS,
+                              temperature=GROQ_GENERAL_TEMPERATURE)
+    if err:
+        raise _GroqCallFailed(err)
+    answer = _complete_if_needed(client, _GROQ_GENERAL_SYSTEM_PROMPT, user, answer,
+                                  MIN_ANSWER_WORDS_DEEP, GROQ_GENERAL_MAX_TOKENS,
+                                  GROQ_GENERAL_TEMPERATURE)
+    _track_groq_tokens(GROQ_EST_TOKENS_PER_GENERAL_CALL)
+    return answer
 
 def ask_groq_general(query: str, quick: bool = False) -> tuple:
     """Fallback: no Sefaria/kitzur results — answer from general Torah knowledge.
     Returns (answer_or_None, error_or_None)."""
-    client, err = _groq_client()
-    if not client:
-        return None, err
-    system = (
-        "אתה רב מלומד המסביר תורה בעברית שוטפת וברורה, בסגנון חם, בהיר וחינוכי — "
-        "כמו רב הנותן שיעור תורה מלא ומקיף, לא סיכום קצר. "
-        "לא נמצאו מקורות ספציפיים בספריא עבור השאלה — ענה מתוך ידיעותיך הכלליות בתורה, "
-        "בפסקאות רציפות וזורמות, כאילו אתה מסביר לשואל פנים אל פנים. "
-        "אל תמספר ואל תעשה רשימה. "
-        "תן תשובה מעמיקה ומפורטת הכוללת: את פסק ההלכה המרכזי; מחלוקות מוכרות בין הפוסקים אם ידועות לך "
-        "(למשל בין מנהג אשכנז למנהג ספרד); דוגמאות מעשיות כשרלוונטי; ושמות ספרים מוכרים (כגון שולחן ערוך, "
-        "משנה ברורה, בן איש חי) רק אם אתה בטוח בהם, בלי ציטוטים או מראי מקום מדויקים (סימן/סעיף) שאינך בטוח בהם. "
-        "סיים בפסקת סיכום מעשי וברור. כתוב לפחות 150 מילה. "
-        "הקפד לסיים את התשובה במלואה — לעולם אל תפסיק באמצע משפט. "
-        "בסוף כתוב: 'לעניין הלכה למעשה יש להיוועץ ברב מורה הוראה.'"
-    )
-    user = f"נושא: {query}\n\n{QUICK_INSTRUCTION}" if quick else f"נושא: {query}"
-    if quick:
-        answer, err = _groq_chat(client, system, user, max_tokens=500)
-        return answer, err
-    answer, err = _groq_chat(client, system, user, max_tokens=2000)
-    return _expand_if_short(client, system, user, answer), err
+    try:
+        return _ask_groq_general_cached(query, quick), None
+    except _GroqCallFailed as e:
+        return None, str(e)
 
 @st.cache_data(show_spinner=False, ttl=300)
 def search_sefaria(query: str, size: int) -> tuple:
-    """Returns (results_list, error_str_or_None)."""
-    seen, results = set(), []
+    """Search Sefaria, score results for topical relevance, and return (results_list, error)."""
+    seen, seen_he_refs, results = set(), set(), []
     last_error = None
 
-    def _fetch(q):
+    def _fetch(q: str) -> None:
         nonlocal last_error
         try:
             r = requests.post(
@@ -333,23 +521,28 @@ def search_sefaria(query: str, size: int) -> tuple:
                 json={"query": q, "type": "text", "size": size,
                       "field": "naive_lemmatizer", "slop": 10,
                       "source_proj": ["heRef", "ref", "path"]},
-                timeout=7,
+                timeout=SEFARIA_TIMEOUT_SECONDS,
             )
             r.raise_for_status()
             for hit in (r.json().get("hits", {}).get("hits") or []):
-                src      = hit.get("_source", {})
-                ref      = src.get("ref") or re.sub(r'\s*\([^)]*\)\s*$', '', hit.get("_id", "")).strip()
-                he_ref   = strip_html(src.get("heRef") or ref)
-                path     = src.get("path", "")
-                snippets = hit.get("highlight", {}).get("naive_lemmatizer", [])
-                he       = strip_html(" ... ".join(snippets))
-                if ref and he and len(he) > 80 and ref not in seen:
-                    seen.add(ref)
-                    results.append({
-                        "heRef": he_ref,
-                        "he":    he[:600] + ("..." if len(he) > 600 else ""),
-                        "_rank": _halachic_rank(path),
-                    })
+                try:
+                    src      = hit.get("_source", {})
+                    ref      = src.get("ref") or re.sub(r'\s*\([^)]*\)\s*$', '', hit.get("_id", "")).strip()
+                    he_ref   = strip_html(src.get("heRef") or ref)
+                    path     = src.get("path", "")
+                    snippets = hit.get("highlight", {}).get("naive_lemmatizer", [])
+                    he       = strip_html(" ... ".join(snippets))
+                    if (ref and he and len(he) > SEFARIA_MIN_SNIPPET_CHARS
+                            and ref not in seen and he_ref not in seen_he_refs):
+                        seen.add(ref)
+                        seen_he_refs.add(he_ref)
+                        results.append({
+                            "heRef": he_ref,
+                            "he":    he[:600] + ("..." if len(he) > 600 else ""),
+                            "_path": path,
+                        })
+                except Exception:
+                    continue
         except requests.exceptions.Timeout:
             last_error = "ספריא לא הגיבה בזמן (timeout). נסה שוב."
         except requests.exceptions.HTTPError as e:
@@ -364,26 +557,37 @@ def search_sefaria(query: str, size: int) -> tuple:
     if primary != query:
         _fetch(query)
 
+    words = [w for w in primary.split() if len(w) > 1]
+    tried = {primary, query}
+    if len(words) >= 2:
+        # Multi-word query: also search each word alone, so results matching
+        # BOTH words (rewarded in _relevance_score) can be found and ranked up.
+        for w in words[:3]:
+            if w not in tried:
+                tried.add(w)
+                _fetch(w)
+
     if len(results) < SEARCH_EXPANSION_THRESHOLD:
-        tried = {primary, query}
-        keywords = [w for w in primary.split() if len(w) > 1 and w not in tried]
-        for w in keywords[:3]:
+        for w in [w for w in words if w not in tried][:3]:
             if len(results) >= SEARCH_EXPANSION_THRESHOLD:
                 break
             tried.add(w)
             _fetch(w)
 
-    results.sort(key=lambda x: x["_rank"])
-    # Suppress the error if we recovered a full result set from a later fetch.
+    for r in results:
+        r["_score"] = _relevance_score(r, words)
+    results.sort(key=lambda r: (-r["_score"], _halachic_rank(r["_path"])))
+
     # No cap on the number of results returned — callers get everything found.
     final_error = last_error if len(results) < size else None
     return (
-        [{k: v for k, v in r.items() if k != "_rank"} for r in results],
+        [{"heRef": r["heRef"], "he": r["he"]} for r in results],
         final_error,
     )
 
 @st.cache_data(show_spinner=False)
-def _load_kitzur_lines():
+def _load_kitzur_lines() -> list:
+    """Load and cache the local Kitzur Shulchan Arukh text file, split into lines."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kitzur_shulchan_aruch.txt")
     if not os.path.exists(path):
         return []
@@ -392,6 +596,7 @@ def _load_kitzur_lines():
 
 @st.cache_data(show_spinner=False)
 def search_local_kitzur(query: str) -> list:
+    """Keyword-match the query against the local Kitzur text and return the top-scoring sections."""
     try:
         lines = _load_kitzur_lines()
         if not lines:
@@ -422,15 +627,44 @@ def search_local_kitzur(query: str) -> list:
     except Exception:
         return []
 
-def _render_groq_error(groq_error: str, margin: bool = False):
-    # groq_error already carries its own icon/prefix (rate-limit vs generic failure)
+SOURCE_TYPE_EMOJI = (
+    (("קיצור שולחן ערוך",), "📔"),
+    (("שולחן ערוך",), "📘"),
+    (("משנה תורה",), "📗"),
+    (("תלמוד", "בבלי", "ירושלמי"), "📜"),
+    (('שו"ת', "שו״ת", "תשובות"), "📙"),
+)
+
+def _source_emoji(he_ref: str) -> str:
+    """Pick a small emoji hinting at the source's type, based on keywords in its title."""
+    for keywords, emoji in SOURCE_TYPE_EMOJI:
+        if any(k in he_ref for k in keywords):
+            return emoji
+    return "📖"
+
+def _render_source_card(s: dict) -> None:
+    """Render a single Sefaria source card with a type-based emoji."""
+    emoji = _source_emoji(s["heRef"])
+    st.markdown(
+        f'<div class="source-card">'
+        f'<div class="source-card-title">{emoji} {html.escape(s["heRef"])}</div>'
+        f'<div class="source-card-text">{html.escape(s["he"])}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+def _render_groq_error(groq_error: str, margin: bool = False) -> None:
+    """Render a Groq error/rate-limit message (already carries its own icon/prefix)."""
     style = ' style="margin-bottom:12px"' if margin else ''
     msg = html.escape(groq_error).replace("\n", "<br>")
     st.markdown(f'<div class="sefaria-error"{style}>{msg}</div>', unsafe_allow_html=True)
 
+NO_RESULTS_MSG = "לא נמצא מידע על נושא זה. נסה: שבת, כשרות, תפילה, ציצית, תפילין, אבילות"
+
 def render_results(sources: list, kitzur: list, error: str | None = None,
                    ai_answer: str | None = None, ai_general: bool = False,
-                   groq_error: str | None = None):
+                   groq_error: str | None = None) -> None:
+    """Render the full results panel: AI answer/error, kitzur sections, and source cards."""
     if error and not sources and not kitzur and not ai_answer:
         st.markdown(
             f'<div class="sefaria-error">⚠️ {html.escape(error)}</div>',
@@ -443,10 +677,12 @@ def render_results(sources: list, kitzur: list, error: str | None = None,
             _render_groq_error(groq_error)
             return
         st.markdown(
-            '<div class="no-results">לא נמצאו מקורות. נסה ניסוח אחר.</div>',
+            f'<div class="no-results">{html.escape(NO_RESULTS_MSG)}</div>',
             unsafe_allow_html=True,
         )
         return
+
+    st.caption(f"נמצאו {len(sources)} מקורות בספריא + {len(kitzur)} קטעים בקיצור שולחן ערוך")
 
     if ai_answer:
         title = (
@@ -484,15 +720,13 @@ def render_results(sources: list, kitzur: list, error: str | None = None,
 
     if sources:
         st.markdown(f"### 📚 מקורות שנמצאו ({len(sources)})")
-        for s in sources:
-            # heRef is already strip_html'd; he is strip_html'd in search_sefaria
-            st.markdown(
-                f'<div class="source-card">'
-                f'<div class="source-card-title">📖 {html.escape(s["heRef"])}</div>'
-                f'<div class="source-card-text">{html.escape(s["he"])}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        for s in sources[:VISIBLE_SOURCES_DEFAULT]:
+            _render_source_card(s)
+        hidden = sources[VISIBLE_SOURCES_DEFAULT:]
+        if hidden:
+            with st.expander(f"הצג עוד {len(hidden)} מקורות"):
+                for s in hidden:
+                    _render_source_card(s)
 
 # ── ממשק ─────────────────────────────────────────────────────────
 st.markdown(CSS, unsafe_allow_html=True)
@@ -524,6 +758,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if not st.secrets.get("GROQ_API_KEY", ""):
+    st.warning("מפתח Groq חסר — תשובות AI לא יעבדו, אך חיפוש במקורות עדיין זמין.")
+
 _defaults = {
     "history": [], "deep_q": "", "quick_q": "",
     "_last_deep": "", "_last_quick": "",
@@ -532,27 +769,39 @@ _defaults = {
     "deep_ai_answer": None, "deep_ai_general": False, "deep_groq_error": None,
     "quick_sources": [], "quick_kitzur": [], "quick_error": None,
     "quick_ai_answer": None, "quick_ai_general": False, "quick_groq_error": None,
+    "groq_tokens_used": 0,
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+if st.session_state.groq_tokens_used > GROQ_DAILY_TOKEN_LIMIT * GROQ_TOKEN_WARNING_RATIO:
+    st.caption(
+        f"⚠️ צריכת Groq גבוהה בסשן זה: כ-{st.session_state.groq_tokens_used:,} "
+        f"טוקנים משוערים מתוך מכסה יומית של כ-{GROQ_DAILY_TOKEN_LIMIT:,}."
+    )
+
+def _set_query_and_rerun(q: str) -> None:
+    """Populate both tabs with q, clear cached results, and rerun — shared by the
+    example buttons and clickable history entries."""
+    st.session_state.update({
+        "deep_q": q, "quick_q": q,
+        "_last_deep": "", "_last_quick": "",
+        "deep_sources": [], "deep_kitzur": [], "deep_error": None,
+        "deep_ai_answer": None, "deep_ai_general": False, "deep_groq_error": None,
+        "quick_sources": [], "quick_kitzur": [], "quick_error": None,
+        "quick_ai_answer": None, "quick_ai_general": False, "quick_groq_error": None,
+    })
+    # bump the widget key version to force the text_input to remount with the new value
+    st.session_state.deep_input_v  += 1
+    st.session_state.quick_input_v += 1
+    st.rerun()
+
 st.markdown('<p style="color:#c5a059;font-weight:600;">💡 דוגמאות לחיפוש:</p>', unsafe_allow_html=True)
 EXAMPLES = ["חשמל בשבת", "כיבוד הורים", "אבילות", "כשרות"]
 for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
     if col.button(q, key=f"ex_{i}", use_container_width=True):
-        st.session_state.update({
-            "deep_q": q, "quick_q": q,
-            "_last_deep": "", "_last_quick": "",
-            "deep_sources": [], "deep_kitzur": [], "deep_error": None,
-            "deep_ai_answer": None, "deep_ai_general": False, "deep_groq_error": None,
-            "quick_sources": [], "quick_kitzur": [], "quick_error": None,
-            "quick_ai_answer": None, "quick_ai_general": False, "quick_groq_error": None,
-        })
-        # bump the widget key version to force the text_input to remount with the new value
-        st.session_state.deep_input_v  += 1
-        st.session_state.quick_input_v += 1
-        st.rerun()
+        _set_query_and_rerun(q)
 
 tab_deep, tab_quick = st.tabs([
     f"🏛️   עיון מעמיק — עד {SEFARIA_DEEP} מקורות",
@@ -573,6 +822,7 @@ with tab_deep:
             value=st.session_state.deep_q,
             key=_deep_key,
         )
+    q_deep = sanitize_query(q_deep)
     with col_btn:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
         _has_deep = bool(st.session_state.get(_deep_key, "") or st.session_state.deep_q)
@@ -599,11 +849,11 @@ with tab_deep:
         if not hist or hist[0] != q_deep.strip():
             hist = [q_deep.strip()] + hist
         st.session_state.history = hist[:HISTORY_MAX]
-        with st.spinner("🔍 מחפש במקורות..."):
+        with st.spinner(f"🔍 מחפש ב-{SEFARIA_DEEP} מקורות תורניים..."):
             sources, err = search_sefaria(q_deep.strip(), SEFARIA_DEEP)
             kitzur       = search_local_kitzur(q_deep.strip())
         ai_general = not sources and not kitzur and not err
-        with st.spinner("🤖 מנתח מקורות עם Groq AI..."):
+        with st.spinner("🤖 גמי תורה לומד את המקורות..."):
             if ai_general:
                 ai_answer, groq_err = ask_groq_general(q_deep.strip())
             else:
@@ -644,6 +894,7 @@ with tab_quick:
             value=st.session_state.quick_q,
             key=_quick_key,
         )
+    q_quick = sanitize_query(q_quick)
     with col_btn_q:
         st.markdown("<div style='padding-top:28px'>", unsafe_allow_html=True)
         _has_quick  = bool(st.session_state.get(_quick_key, "") or st.session_state.quick_q)
@@ -670,11 +921,11 @@ with tab_quick:
         if not hist or hist[0] != q_quick.strip():
             hist = [q_quick.strip()] + hist
         st.session_state.history = hist[:HISTORY_MAX]
-        with st.spinner("🔍 מחפש במקורות..."):
+        with st.spinner(f"🔍 מחפש ב-{SEFARIA_QUICK} מקורות תורניים..."):
             sources_q, err_q = search_sefaria(q_quick.strip(), SEFARIA_QUICK)
             kitzur_q         = search_local_kitzur(q_quick.strip())
         ai_general_q = not sources_q and not kitzur_q and not err_q
-        with st.spinner("🤖 מנתח מקורות עם Groq AI..."):
+        with st.spinner("🤖 גמי תורה לומד את המקורות..."):
             if ai_general_q:
                 ai_answer_q, groq_err_q = ask_groq_general(q_quick.strip(), quick=True)
             else:
@@ -703,6 +954,6 @@ with tab_quick:
 if st.session_state.history:
     st.write("---")
     st.markdown("### 📚 שאלות קודמות:")
-    for q in st.session_state.history:
-        # use st.text to avoid markdown injection from user-supplied query strings
-        st.text(f"🔹 {q}")
+    for i, q in enumerate(st.session_state.history):
+        if st.button(f"🔹 {q}", key=f"hist_{i}"):
+            _set_query_and_rerun(q)
