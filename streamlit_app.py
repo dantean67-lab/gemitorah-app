@@ -13,8 +13,8 @@ st.set_page_config(
     layout="wide"
 )
 
-SEFARIA_DEEP     = 20
-SEFARIA_QUICK    = 8
+SEFARIA_DEEP     = 100
+SEFARIA_QUICK    = 30
 SEARCH_EXPANSION_THRESHOLD = 8
 KITZUR_MAX_CHARS = 2000
 KITZUR_SECTIONS  = 5
@@ -176,27 +176,32 @@ def _halachic_rank(path: str) -> int:
             return i
     return len(HALACHIC_PATHS)
 
+GROQ_SOURCE_TRIM_CHARS = 200
+
 def _format_sources_for_groq(sources: list, kitzur: list) -> str:
     parts = []
     if kitzur:
         parts.append("מקור ראשי - קיצור שולחן ערוך:")
         for section in kitzur[:3]:
-            parts.append(section[:400])
+            parts.append(section[:GROQ_SOURCE_TRIM_CHARS])
     for i, s in enumerate(sources, 1):
-        parts.append(f"[{i}] {s['heRef']}:\n{s['he']}")
+        parts.append(f"[{i}] {s['heRef']}:\n{s['he'][:GROQ_SOURCE_TRIM_CHARS]}")
     return "\n\n".join(parts)
 
 def _groq_client():
+    """Returns (client_or_None, error_or_None)."""
     api_key = st.secrets.get("GROQ_API_KEY", "")
     if not api_key:
-        return None
+        return None, "מפתח GROQ_API_KEY לא הוגדר בהגדרות."
     try:
         from groq import Groq
-        return Groq(api_key=api_key)
-    except Exception:
-        return None
+        return Groq(api_key=api_key), None
+    except Exception as e:
+        print(f"Groq client init error: {e}")
+        return None, f"שגיאת אתחול Groq: {e}"
 
-def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> str | None:
+def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> tuple:
+    """Returns (content_or_None, error_or_None)."""
     try:
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -207,9 +212,10 @@ def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> str | 
             temperature=0.3,
             max_tokens=max_tokens,
         )
-        return resp.choices[0].message.content.strip()
-    except Exception:
-        return None
+        return resp.choices[0].message.content.strip(), None
+    except Exception as e:
+        print(f"Groq chat error: {e}")
+        return None, str(e)
 
 MIN_ANSWER_WORDS = 150
 
@@ -218,7 +224,7 @@ def _expand_if_short(client, system: str, user: str, answer: str | None) -> str 
     with more detail rather than re-deriving a new, shorter one."""
     if not answer or len(answer.split()) >= MIN_ANSWER_WORDS:
         return answer
-    expanded = _groq_chat(
+    expanded, _err = _groq_chat(
         client,
         system,
         f"{user}\n\nהתשובה הקודמת שכתבת:\n{answer}\n\n"
@@ -242,12 +248,13 @@ _GROQ_SYSTEM_PROMPT = """אתה עוזר תורני מומחה ברמת פוסק
 
 QUICK_INSTRUCTION = "ענה בדיוק ב-5-6 משפטים, כולל דוגמה מעשית אחת. אל תרחיב מעבר לכך."
 
-def ask_groq(query: str, sources: list, kitzur: list, quick: bool = False) -> str | None:
+def ask_groq(query: str, sources: list, kitzur: list, quick: bool = False) -> tuple:
+    """Returns (answer_or_None, error_or_None)."""
     if not sources and not kitzur:
-        return None
-    client = _groq_client()
+        return None, None
+    client, err = _groq_client()
     if not client:
-        return None
+        return None, err
     blob = _format_sources_for_groq(sources, kitzur)
     user = (
         f"נושא: {query}\n\n"
@@ -257,15 +264,17 @@ def ask_groq(query: str, sources: list, kitzur: list, quick: bool = False) -> st
         + f"מקורות:\n{blob}"
     )
     if quick:
-        return _groq_chat(client, _GROQ_SYSTEM_PROMPT, user, max_tokens=500)
-    answer = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user, max_tokens=2000)
-    return _expand_if_short(client, _GROQ_SYSTEM_PROMPT, user, answer)
+        answer, err = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user, max_tokens=500)
+        return answer, err
+    answer, err = _groq_chat(client, _GROQ_SYSTEM_PROMPT, user, max_tokens=2000)
+    return _expand_if_short(client, _GROQ_SYSTEM_PROMPT, user, answer), err
 
-def ask_groq_general(query: str, quick: bool = False) -> str | None:
-    """Fallback: no Sefaria/kitzur results — answer from general Torah knowledge."""
-    client = _groq_client()
+def ask_groq_general(query: str, quick: bool = False) -> tuple:
+    """Fallback: no Sefaria/kitzur results — answer from general Torah knowledge.
+    Returns (answer_or_None, error_or_None)."""
+    client, err = _groq_client()
     if not client:
-        return None
+        return None, err
     system = (
         "אתה רב מלומד המסביר תורה בעברית שוטפת וברורה, בסגנון חם, בהיר וחינוכי — "
         "כמו רב הנותן שיעור תורה מלא ומקיף, לא סיכום קצר. "
@@ -281,9 +290,10 @@ def ask_groq_general(query: str, quick: bool = False) -> str | None:
     )
     user = f"נושא: {query}\n\n{QUICK_INSTRUCTION}" if quick else f"נושא: {query}"
     if quick:
-        return _groq_chat(client, system, user, max_tokens=500)
-    answer = _groq_chat(client, system, user, max_tokens=2000)
-    return _expand_if_short(client, system, user, answer)
+        answer, err = _groq_chat(client, system, user, max_tokens=500)
+        return answer, err
+    answer, err = _groq_chat(client, system, user, max_tokens=2000)
+    return _expand_if_short(client, system, user, answer), err
 
 @st.cache_data(show_spinner=False, ttl=300)
 def search_sefaria(query: str, size: int) -> tuple:
@@ -297,7 +307,7 @@ def search_sefaria(query: str, size: int) -> tuple:
             r = requests.post(
                 SEFARIA_URL,
                 headers={"Content-Type": "application/json"},
-                json={"query": q, "type": "text", "size": size * 3,
+                json={"query": q, "type": "text", "size": size,
                       "field": "naive_lemmatizer", "slop": 10,
                       "source_proj": ["heRef", "ref", "path"]},
                 timeout=7,
@@ -341,10 +351,11 @@ def search_sefaria(query: str, size: int) -> tuple:
             _fetch(w)
 
     results.sort(key=lambda x: x["_rank"])
-    # Suppress the error if we recovered a full result set from a later fetch
+    # Suppress the error if we recovered a full result set from a later fetch.
+    # No cap on the number of results returned — callers get everything found.
     final_error = last_error if len(results) < size else None
     return (
-        [{k: v for k, v in r.items() if k != "_rank"} for r in results[:size]],
+        [{k: v for k, v in r.items() if k != "_rank"} for r in results],
         final_error,
     )
 
@@ -389,7 +400,8 @@ def search_local_kitzur(query: str) -> list:
         return []
 
 def render_results(sources: list, kitzur: list, error: str | None = None,
-                   ai_answer: str | None = None, ai_general: bool = False):
+                   ai_answer: str | None = None, ai_general: bool = False,
+                   groq_error: str | None = None):
     if error and not sources and not kitzur and not ai_answer:
         st.markdown(
             f'<div class="sefaria-error">⚠️ {html.escape(error)}</div>',
@@ -398,6 +410,12 @@ def render_results(sources: list, kitzur: list, error: str | None = None,
         return
 
     if not sources and not kitzur and not ai_answer:
+        if groq_error:
+            st.markdown(
+                f'<div class="sefaria-error">⚠️ שגיאת Groq: {html.escape(groq_error)}</div>',
+                unsafe_allow_html=True,
+            )
+            return
         st.markdown(
             '<div class="no-results">לא נמצאו מקורות. נסה ניסוח אחר.</div>',
             unsafe_allow_html=True,
@@ -415,6 +433,11 @@ def render_results(sources: list, kitzur: list, error: str | None = None,
             f'<div class="ai-answer-title">{title}</div>'
             f'<div class="ai-answer-text">{html.escape(strip_markdown(ai_answer))}</div>'
             f'</div>',
+            unsafe_allow_html=True,
+        )
+    elif groq_error:
+        st.markdown(
+            f'<div class="sefaria-error" style="margin-bottom:12px">⚠️ שגיאת Groq: {html.escape(groq_error)}</div>',
             unsafe_allow_html=True,
         )
 
@@ -483,9 +506,9 @@ _defaults = {
     "_last_deep": "", "_last_quick": "",
     "deep_input_v": 0, "quick_input_v": 0,
     "deep_sources": [], "deep_kitzur": [], "deep_error": None,
-    "deep_ai_answer": None, "deep_ai_general": False,
+    "deep_ai_answer": None, "deep_ai_general": False, "deep_groq_error": None,
     "quick_sources": [], "quick_kitzur": [], "quick_error": None,
-    "quick_ai_answer": None, "quick_ai_general": False,
+    "quick_ai_answer": None, "quick_ai_general": False, "quick_groq_error": None,
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -499,9 +522,9 @@ for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
             "deep_q": q, "quick_q": q,
             "_last_deep": "", "_last_quick": "",
             "deep_sources": [], "deep_kitzur": [], "deep_error": None,
-            "deep_ai_answer": None, "deep_ai_general": False,
+            "deep_ai_answer": None, "deep_ai_general": False, "deep_groq_error": None,
             "quick_sources": [], "quick_kitzur": [], "quick_error": None,
-            "quick_ai_answer": None, "quick_ai_general": False,
+            "quick_ai_answer": None, "quick_ai_general": False, "quick_groq_error": None,
         })
         # bump the widget key version to force the text_input to remount with the new value
         st.session_state.deep_input_v  += 1
@@ -509,14 +532,14 @@ for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
         st.rerun()
 
 tab_deep, tab_quick = st.tabs([
-    f"🏛️   עיון מעמיק — {SEFARIA_DEEP} מקורות",
-    f"⚡   בירור מהיר — {SEFARIA_QUICK} מקורות",
+    f"🏛️   עיון מעמיק — עד {SEFARIA_DEEP} מקורות",
+    f"⚡   בירור מהיר — עד {SEFARIA_QUICK} מקורות",
 ])
 
 with tab_deep:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
-        f'חיפוש נרחב — {SEFARIA_DEEP} מקורות מספריא + קיצור שולחן ערוך</p>',
+        f'חיפוש נרחב — עד {SEFARIA_DEEP} מקורות מספריא + קיצור שולחן ערוך</p>',
         unsafe_allow_html=True,
     )
     col_input, col_btn = st.columns([5, 1])
@@ -537,7 +560,7 @@ with tab_deep:
                 st.session_state.update({
                     "deep_q": "", "_last_deep": "",
                     "deep_sources": [], "deep_kitzur": [], "deep_error": None,
-                    "deep_ai_answer": None, "deep_ai_general": False,
+                    "deep_ai_answer": None, "deep_ai_general": False, "deep_groq_error": None,
                 })
                 # bump the widget key version to force the text_input to remount empty
                 st.session_state.deep_input_v += 1
@@ -559,24 +582,27 @@ with tab_deep:
         ai_general = not sources and not kitzur and not err
         with st.spinner("🤖 מנתח מקורות עם Groq AI..."):
             if ai_general:
-                ai_answer = ask_groq_general(q_deep.strip())
+                ai_answer, groq_err = ask_groq_general(q_deep.strip())
             else:
-                ai_answer = ask_groq(q_deep.strip(), sources, kitzur)
+                ai_answer, groq_err = ask_groq(q_deep.strip(), sources, kitzur)
         st.session_state.deep_sources    = sources
         st.session_state.deep_kitzur     = kitzur
         st.session_state.deep_error      = err
         st.session_state.deep_ai_answer  = ai_answer
         st.session_state.deep_ai_general = ai_general
+        st.session_state.deep_groq_error = groq_err
 
     # render cached results — survives tab switches
     if (st.session_state.deep_sources or st.session_state.deep_kitzur
-            or st.session_state.deep_error or st.session_state.deep_ai_answer):
+            or st.session_state.deep_error or st.session_state.deep_ai_answer
+            or st.session_state.deep_groq_error):
         render_results(
             st.session_state.deep_sources,
             st.session_state.deep_kitzur,
             st.session_state.deep_error,
             st.session_state.deep_ai_answer,
             st.session_state.deep_ai_general,
+            st.session_state.deep_groq_error,
         )
     elif st.session_state._last_deep:
         render_results([], [], None)
@@ -584,7 +610,7 @@ with tab_deep:
 with tab_quick:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
-        f'חיפוש ממוקד — {SEFARIA_QUICK} מקורות מספריא</p>',
+        f'חיפוש ממוקד — עד {SEFARIA_QUICK} מקורות מספריא</p>',
         unsafe_allow_html=True,
     )
     col_input_q, col_btn_q = st.columns([5, 1])
@@ -605,7 +631,7 @@ with tab_quick:
                 st.session_state.update({
                     "quick_q": "", "_last_quick": "",
                     "quick_sources": [], "quick_kitzur": [], "quick_error": None,
-                    "quick_ai_answer": None, "quick_ai_general": False,
+                    "quick_ai_answer": None, "quick_ai_general": False, "quick_groq_error": None,
                 })
                 # bump the widget key version to force the text_input to remount empty
                 st.session_state.quick_input_v += 1
@@ -627,23 +653,26 @@ with tab_quick:
         ai_general_q = not sources_q and not kitzur_q and not err_q
         with st.spinner("🤖 מנתח מקורות עם Groq AI..."):
             if ai_general_q:
-                ai_answer_q = ask_groq_general(q_quick.strip(), quick=True)
+                ai_answer_q, groq_err_q = ask_groq_general(q_quick.strip(), quick=True)
             else:
-                ai_answer_q = ask_groq(q_quick.strip(), sources_q, kitzur_q, quick=True)
+                ai_answer_q, groq_err_q = ask_groq(q_quick.strip(), sources_q, kitzur_q, quick=True)
         st.session_state.quick_sources     = sources_q
         st.session_state.quick_kitzur      = kitzur_q
         st.session_state.quick_error       = err_q
         st.session_state.quick_ai_answer   = ai_answer_q
         st.session_state.quick_ai_general  = ai_general_q
+        st.session_state.quick_groq_error  = groq_err_q
 
     if (st.session_state.quick_sources or st.session_state.quick_kitzur
-            or st.session_state.quick_error or st.session_state.quick_ai_answer):
+            or st.session_state.quick_error or st.session_state.quick_ai_answer
+            or st.session_state.quick_groq_error):
         render_results(
             st.session_state.quick_sources,
             st.session_state.quick_kitzur,
             st.session_state.quick_error,
             st.session_state.quick_ai_answer,
             st.session_state.quick_ai_general,
+            st.session_state.quick_groq_error,
         )
     elif st.session_state._last_quick:
         render_results([], [], None)
