@@ -176,29 +176,50 @@ def _halachic_rank(path: str) -> int:
             return i
     return len(HALACHIC_PATHS)
 
-GROQ_SOURCE_TRIM_CHARS = 200
+# Sources are shown in full in the UI, but only the top few (already sorted by
+# halachic relevance) are sent to Groq, trimmed hard, to stay under its token limit.
+GROQ_SOURCE_TRIM_CHARS  = 150
+GROQ_TOP_SOURCES_DEEP   = 8
+GROQ_TOP_SOURCES_QUICK  = 4
+GROQ_TOP_KITZUR_DEEP    = 3
+GROQ_TOP_KITZUR_QUICK   = 2
 
-def _format_sources_for_groq(sources: list, kitzur: list) -> str:
+GROQ_RATE_LIMIT_MSG = (
+    "⏳ מכסת Groq היומית אזלה. נסה שוב בעוד כמה שעות.\n"
+    "המקורות מוצגים למטה לעיונך."
+)
+
+def _format_sources_for_groq(sources: list, kitzur: list, quick: bool = False) -> str:
+    top_sources = GROQ_TOP_SOURCES_QUICK if quick else GROQ_TOP_SOURCES_DEEP
+    top_kitzur  = GROQ_TOP_KITZUR_QUICK if quick else GROQ_TOP_KITZUR_DEEP
     parts = []
     if kitzur:
         parts.append("מקור ראשי - קיצור שולחן ערוך:")
-        for section in kitzur[:3]:
+        for section in kitzur[:top_kitzur]:
             parts.append(section[:GROQ_SOURCE_TRIM_CHARS])
-    for i, s in enumerate(sources, 1):
+    for i, s in enumerate(sources[:top_sources], 1):
         parts.append(f"[{i}] {s['heRef']}:\n{s['he'][:GROQ_SOURCE_TRIM_CHARS]}")
     return "\n\n".join(parts)
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    if getattr(e, "status_code", None) == 429:
+        return True
+    if type(e).__name__ == "RateLimitError":
+        return True
+    msg = str(e).lower()
+    return "429" in msg or "rate_limit" in msg or "rate limit" in msg
 
 def _groq_client():
     """Returns (client_or_None, error_or_None)."""
     api_key = st.secrets.get("GROQ_API_KEY", "")
     if not api_key:
-        return None, "מפתח GROQ_API_KEY לא הוגדר בהגדרות."
+        return None, "⚠️ שגיאת Groq: מפתח GROQ_API_KEY לא הוגדר בהגדרות."
     try:
         from groq import Groq
         return Groq(api_key=api_key), None
     except Exception as e:
         print(f"Groq client init error: {e}")
-        return None, f"שגיאת אתחול Groq: {e}"
+        return None, f"⚠️ שגיאת Groq: שגיאת אתחול ({e})."
 
 def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> tuple:
     """Returns (content_or_None, error_or_None)."""
@@ -215,7 +236,9 @@ def _groq_chat(client, system: str, user: str, max_tokens: int = 1024) -> tuple:
         return resp.choices[0].message.content.strip(), None
     except Exception as e:
         print(f"Groq chat error: {e}")
-        return None, str(e)
+        if _is_rate_limit_error(e):
+            return None, GROQ_RATE_LIMIT_MSG
+        return None, f"⚠️ שגיאת Groq: {e}"
 
 MIN_ANSWER_WORDS = 150
 
@@ -255,7 +278,7 @@ def ask_groq(query: str, sources: list, kitzur: list, quick: bool = False) -> tu
     client, err = _groq_client()
     if not client:
         return None, err
-    blob = _format_sources_for_groq(sources, kitzur)
+    blob = _format_sources_for_groq(sources, kitzur, quick)
     user = (
         f"נושא: {query}\n\n"
         f"השתמש רק במקורות הרלוונטיים ישירות לנושא \"{query}\" — "
@@ -399,6 +422,12 @@ def search_local_kitzur(query: str) -> list:
     except Exception:
         return []
 
+def _render_groq_error(groq_error: str, margin: bool = False):
+    # groq_error already carries its own icon/prefix (rate-limit vs generic failure)
+    style = ' style="margin-bottom:12px"' if margin else ''
+    msg = html.escape(groq_error).replace("\n", "<br>")
+    st.markdown(f'<div class="sefaria-error"{style}>{msg}</div>', unsafe_allow_html=True)
+
 def render_results(sources: list, kitzur: list, error: str | None = None,
                    ai_answer: str | None = None, ai_general: bool = False,
                    groq_error: str | None = None):
@@ -411,10 +440,7 @@ def render_results(sources: list, kitzur: list, error: str | None = None,
 
     if not sources and not kitzur and not ai_answer:
         if groq_error:
-            st.markdown(
-                f'<div class="sefaria-error">⚠️ שגיאת Groq: {html.escape(groq_error)}</div>',
-                unsafe_allow_html=True,
-            )
+            _render_groq_error(groq_error)
             return
         st.markdown(
             '<div class="no-results">לא נמצאו מקורות. נסה ניסוח אחר.</div>',
@@ -436,10 +462,7 @@ def render_results(sources: list, kitzur: list, error: str | None = None,
             unsafe_allow_html=True,
         )
     elif groq_error:
-        st.markdown(
-            f'<div class="sefaria-error" style="margin-bottom:12px">⚠️ שגיאת Groq: {html.escape(groq_error)}</div>',
-            unsafe_allow_html=True,
-        )
+        _render_groq_error(groq_error, margin=True)
 
     if error:
         st.markdown(
