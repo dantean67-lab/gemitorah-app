@@ -319,9 +319,12 @@ def _format_rate_limit_message(e: Exception) -> str:
         except Exception:
             total_seconds = None
     if total_seconds is None:
-        m = re.search(r'try again in\s+(?:([\d.]+)h)?\s*(?:([\d.]+)m)?\s*(?:([\d.]+)s)?',
+        # Groq's message reads e.g. "Please try again in 1h2m3.4s" — anchor on the
+        # mandatory seconds component rather than the exact surrounding phrase,
+        # since h/m are optional and wording can vary.
+        m = re.search(r'(?:([\d.]+)\s*h\s*)?(?:([\d.]+)\s*m\s*)?([\d.]+)\s*s',
                        str(e), re.IGNORECASE)
-        if m and any(m.groups()):
+        if m:
             h, mnt, s = (float(g) if g else 0.0 for g in m.groups())
             total_seconds = h * 3600 + mnt * 60 + s
     if total_seconds is None:
@@ -804,21 +807,21 @@ for i, (col, q) in enumerate(zip(st.columns(4), EXAMPLES)):
         _set_query_and_rerun(q)
 
 tab_deep, tab_quick = st.tabs([
-    f"🏛️   עיון מעמיק — עד {SEFARIA_DEEP} מקורות",
+    "🏛️   עיון מעמיק — כמה שיותר מקורות",
     f"⚡   בירור מהיר — עד {SEFARIA_QUICK} מקורות",
 ])
 
 with tab_deep:
     st.markdown(
         '<p style="color:#c5a059;font-weight:600;margin-top:8px;">'
-        f'חיפוש נרחב — עד {SEFARIA_DEEP} מקורות מספריא + קיצור שולחן ערוך</p>',
+        'חיפוש נרחב — כמה שיותר מקורות מספריא + קיצור שולחן ערוך</p>',
         unsafe_allow_html=True,
     )
     col_input, col_btn = st.columns([5, 1])
     _deep_key = f"input_deep_{st.session_state.deep_input_v}"
     with col_input:
         q_deep = st.text_input(
-            "🔍 חפש נושא או מושג (לדוגמה: שבת, כשרות, תפילין) — לא שאלות מלאות:",
+            "🔍 חפש נושא, מושג או שאלה תורנית:",
             value=st.session_state.deep_q,
             key=_deep_key,
         )
@@ -890,7 +893,7 @@ with tab_quick:
     _quick_key = f"input_quick_{st.session_state.quick_input_v}"
     with col_input_q:
         q_quick = st.text_input(
-            "🔍 חפש נושא או מושג (לדוגמה: שבת, כשרות, תפילין) — לא שאלות מלאות:",
+            "🔍 חפש נושא, מושג או שאלה תורנית:",
             value=st.session_state.quick_q,
             key=_quick_key,
         )
