@@ -510,8 +510,10 @@ def ask_groq_general(query: str, quick: bool = False) -> tuple:
         return None, str(e)
 
 @st.cache_data(show_spinner=False, ttl=300)
-def search_sefaria(query: str, size: int) -> tuple:
-    """Search Sefaria, score results for topical relevance, and return (results_list, error)."""
+def search_sefaria(query: str, size: int, max_results: int | None = None) -> tuple:
+    """Search Sefaria, score results for topical relevance, and return (results_list, error).
+    max_results hard-caps the final (deduplicated, sorted) list — e.g. the quick tab should
+    stay visibly lighter than deep even though both tabs run the same expansion logic."""
     seen, seen_he_refs, results = set(), set(), []
     last_error = None
 
@@ -581,8 +583,9 @@ def search_sefaria(query: str, size: int) -> tuple:
         r["_score"] = _relevance_score(r, words)
     results.sort(key=lambda r: (-r["_score"], _halachic_rank(r["_path"])))
 
-    # No cap on the number of results returned — callers get everything found.
     final_error = last_error if len(results) < size else None
+    if max_results is not None:
+        results = results[:max_results]
     return (
         [{"heRef": r["heRef"], "he": r["he"]} for r in results],
         final_error,
@@ -925,7 +928,7 @@ with tab_quick:
             hist = [q_quick.strip()] + hist
         st.session_state.history = hist[:HISTORY_MAX]
         with st.spinner(f"🔍 מחפש ב-{SEFARIA_QUICK} מקורות תורניים..."):
-            sources_q, err_q = search_sefaria(q_quick.strip(), SEFARIA_QUICK)
+            sources_q, err_q = search_sefaria(q_quick.strip(), SEFARIA_QUICK, max_results=SEFARIA_QUICK)
             kitzur_q         = search_local_kitzur(q_quick.strip())
         ai_general_q = not sources_q and not kitzur_q and not err_q
         with st.spinner("🤖 גמי תורה לומד את המקורות..."):
